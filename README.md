@@ -1,3 +1,3 @@
-# veScale
+# VeScale
 
 ## Coming Soon
