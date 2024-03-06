@@ -1,0 +1,96 @@
+---
+ test/distributed/_tensor/test_dtensor.py | 10 ++++++++++
+ torch/_tensor.py                         |  1 +
+ torch/csrc/autograd/python_variable.cpp  | 17 ++++++++++++-----
+ torch/distributed/_tensor/api.py         |  1 +
+ 4 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/test/distributed/_tensor/test_dtensor.py b/test/distributed/_tensor/test_dtensor.py
+index a83efe539e4..e190c5b97d5 100644
+--- a/test/distributed/_tensor/test_dtensor.py
++++ b/test/distributed/_tensor/test_dtensor.py
+@@ -109,6 +109,16 @@ class DTensorTest(DTensorTestBase):
+             value_tensor = torch.empty_like(meta_dtensor.to_local()).fill_(1.5)
+             self.assertEqual(meta_dtensor.to_local(), value_tensor)
+ 
++    @with_comms
++    def test_dtensor_local_tensor_storage(self):
++        device_mesh = self.build_device_mesh()
++        shard0_spec = [Shard(0)]
++        local_tensor = torch.randn(4, 8)
++        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
++        self.assertEqual(dist_tensor.data_ptr(), dist_tensor._local_tensor.data_ptr())
++        local_tensor = dist_tensor.to_local()
++        self.assertEqual(dist_tensor.data_ptr(), local_tensor.data_ptr())
++
+     @with_comms
+     def test_modules_w_meta_dtensor(self):
+         model = DummyMLP("meta")
+diff --git a/torch/_tensor.py b/torch/_tensor.py
+index 3aa0cee639d..dd76e76e841 100644
+--- a/torch/_tensor.py
++++ b/torch/_tensor.py
+@@ -107,6 +107,7 @@ class Tensor(torch._C.TensorBase):
+                     and self.device.type == torch._C._get_privateuse1_backend_name()
+                 )
+                 or (type(self) is not Tensor and self.data_ptr() == 0)
++                or type(self).__name__ == "DTensor"
+             ):
+                 new_tensor = self.clone()
+                 if type(new_tensor) is not type(self):
+diff --git a/torch/csrc/autograd/python_variable.cpp b/torch/csrc/autograd/python_variable.cpp
+index ba0e913896d..0335434fbe5 100644
+--- a/torch/csrc/autograd/python_variable.cpp
++++ b/torch/csrc/autograd/python_variable.cpp
+@@ -656,9 +656,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
+       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
+       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+-      "DispatchKeySet _extra_dispatch_keys=None)",
++      "DispatchKeySet _extra_dispatch_keys=None, SymInt? data_ptr= None)",
+   });
+-  ParsedArgs<14> parsed_args{};
++  ParsedArgs<15> parsed_args{};
+   auto r = parser.parse(args, kwargs, parsed_args);
+   PyObject* cls = r.pyobject(0);
+ 
+@@ -726,8 +726,15 @@ static PyObject* THPVariable_make_wrapper_subclass(
+         size_bytes,
+         /*allocator=*/c10::GetAllocator(c10::kMeta),
+         /*resizable=*/true};
+-    // TODO: constructor should probably accept data pointer
+-    storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
++    auto data_ptr = r.toSymIntOptional(14);
++    if (data_ptr.value_or(0) != 0) {
++      // NOLINTNEXTLINE(performance-no-int-to-ptr)
++      void* p = reinterpret_cast<void*>(
++          static_cast<uintptr_t>(data_ptr->expect_int()));
++      storage.set_data_ptr_noswap(at::DataPtr{p, r.device(7)});
++    } else {
++      storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
++    }
+ 
+     auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+     if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
+@@ -2210,4 +2217,4 @@ bool THPVariable_initModule(PyObject* module) {
+   torch::autograd::initTensorImplConversion(module);
+   torch::utils::validate_numpy_for_dlpack_deleter_bug();
+   return true;
+-}
++}
+\ No newline at end of file
+diff --git a/torch/distributed/_tensor/api.py b/torch/distributed/_tensor/api.py
+index 068bc8b9af8..5a577046244 100644
+--- a/torch/distributed/_tensor/api.py
++++ b/torch/distributed/_tensor/api.py
+@@ -233,6 +233,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
+             device=local_tensor.device,
+             layout=local_tensor.layout,
+             requires_grad=requires_grad,
++            data_ptr=local_tensor.data_ptr(),
+         )
+ 
+         tensor_meta = TensorMeta(shape, stride, dtype)
+-- 
+2.30.2
+

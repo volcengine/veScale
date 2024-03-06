@@ -1,0 +1,305 @@
+Subject: [PATCH] support torch 2.1
+---
+Index: src/cc/torchdistx/deferred_init.cc
+<+>UTF-8
+===================================================================
+diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_init.cc
+--- a/src/cc/torchdistx/deferred_init.cc	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
++++ b/src/cc/torchdistx/deferred_init.cc	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+@@ -173,6 +173,7 @@
+   }
+
+   void materialize();
++  void materializeWithShape(c10::IntArrayRef shape, const c10::optional<c10::Device> device);
+
+   std::size_t num_outputs() const noexcept {
+     return num_outputs_;
+@@ -220,7 +221,6 @@
+   };
+
+   const FunctionSchema& shm = handle.schema();
+-
+   return Op{shm.name(), std::move(fn), shm.arguments().size(), shm.returns().size(), std::move(s)};
+ }
+
+@@ -271,6 +271,44 @@
+   materialized_ = true;
+ }
+
++void Op::materializeWithShape(c10::IntArrayRef shape, const c10::optional<c10::Device> device) {
++  if (materialized_) {
++    return;
++  }
++
++  {
++    ThreadLocalStateGuard state_guard{*tls_};
++
++    auto replace_first_shape = [&](c10::IntArrayRef sp){
++      IValue local_shape(sp);
++      stack_[0] = local_shape;
++    };
++
++    std::vector<std::string> op_white_list{"aten::randn", "aten::rand", "aten::empty", "aten::ones", "aten::zeros", "aten::full" };
++
++    if (std::find(op_white_list.begin(),op_white_list.end(), name()) != op_white_list.end()){
++      // if the op is operator
++      replace_first_shape(shape);
++    }
++
++    if(device.has_value()){ // set target device
++      for (size_t i = 0 ; i < stack_.size(); i++){
++        if(stack_[i].isDevice()){
++          stack_[i] = IValue(device.value());
++        }
++      }
++    }
++
++    fn_(stack_);
++  }
++
++  fn_ = nullptr;
++
++  tls_ = nullopt;
++
++  materialized_ = true;
++}
++
+ const Tensor& Op::getOutput(std::size_t idx) const noexcept {
+   const Tensor* opt_out = nullptr;
+
+@@ -343,6 +381,8 @@
+   // Materializes the operation held by this node along with all the operations
+   // in its recorded call stack.
+   void materialize();
++  // with changed shape
++  void materializeWithShape(c10::IntArrayRef shape, c10::optional<c10::Device> device);
+
+  private:
+   void buildCallStack();
+@@ -527,6 +567,30 @@
+   call_stack_.clear();
+ }
+
++void OpNode::materializeWithShape(c10::IntArrayRef shape, const c10::optional<c10::Device> device) {
++  // Do not try to shortcut this function by checking if the node is already
++  // materialized. A later in-place operation can still change the output of
++  // this node.
++
++  buildCallStack();
++
++  for (OpNode* node : call_stack_) {
++    if (node->op_.materialized()) {
++      continue;
++    }
++
++    node->materializeArguments();
++
++    node->op_.materializeWithShape(shape, device);
++
++    // Make sure that we deallocate parts of the operation graph that are not
++    // needed anymore.
++    node->detachDependencies();
++  }
++
++  call_stack_.clear();
++}
++
+ void OpNode::buildCallStack() {
+   OpNode* last_node = getLastInPlaceOpNode();
+
+@@ -717,6 +781,24 @@
+
+   output_desc.node()->materialize();
+
++  Tensor out = output_desc.node()->op().getOutput(output_desc.output_index());
++
++  // Unfortunately there is no way for us to track calls to `requires_grad_()`,
++  // so instead we explicitly set `requires_grad` after materialization.
++  if (fake.is_leaf() && fake.requires_grad()) {
++    out.set_requires_grad(true);
++  }
++
++  return out;
++}
++
++Tensor materialize_with_shape(const Tensor& fake, c10::IntArrayRef shape, const c10::optional<c10::Device> device) {
++  TensorRecord& record = getTensorRecord(fake);
++
++  const OpOutputDescriptor& output_desc = record.output_descriptor();
++
++  output_desc.node()->materializeWithShape(shape, device);
++
+   Tensor out = output_desc.node()->op().getOutput(output_desc.output_index());
+
+   // Unfortunately there is no way for us to track calls to `requires_grad_()`,
+@@ -1032,6 +1114,12 @@
+     inner_->requires_grad_(self, value);
+   }
+
++  void basic_autograd_not_implemented_fallback(const c10::OperatorHandle& op,
++                                               c10::DispatchKeySet dispatch_keys,
++                                               torch::jit::Stack* stack) const override {
++    inner_->basic_autograd_not_implemented_fallback(op, dispatch_keys, stack);
++  }
++
+   VariableHooksInterface* inner() noexcept {
+     return inner_;
+   }
+@@ -1164,6 +1252,7 @@
+   return isFake(tensor) && unsafeAsFake(tensor).hasData(DispatchKey::DeferredInit);
+ }
+
++
+ Tensor materializeTensor(const Tensor& tensor) {
+   if (canMaterialize(tensor)) {
+     return detail::materialize(tensor);
+@@ -1172,4 +1261,24 @@
+   }
+ }
+
++Tensor materializeTensorWithLocalShape(const at::Tensor& tensor, c10::IntArrayRef shape, const c10::optional<c10::Device> device){
++  if (canMaterialize(tensor)) {
++    return detail::materialize_with_shape(tensor, shape, device);
++  } else {
++    return tensor;
++  }
++}
++
++bool isGenByRandomOp(const Tensor& tensor) noexcept{
++  if (canMaterialize(tensor)) {
++    detail::TensorRecord& record = detail::getTensorRecord(tensor);
++    const detail::OpOutputDescriptor& output_desc = record.output_descriptor();
++    auto name = output_desc.node()->op().name();
++    std::vector<std::string> op_white_list{"aten::randn", "aten::rand"};
++    return std::find(op_white_list.begin(),op_white_list.end(), name) != op_white_list.end();
++  }else{
++    return false;
++  }
++}
++
+ }  // namespace torchdistx
+Index: src/cc/torchdistx/deferred_init.h
+<+>UTF-8
+===================================================================
+diff --git a/src/cc/torchdistx/deferred_init.h b/src/cc/torchdistx/deferred_init.h
+--- a/src/cc/torchdistx/deferred_init.h	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
++++ b/src/cc/torchdistx/deferred_init.h	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+@@ -8,6 +8,8 @@
+
+ #include <c10/core/DispatchKey.h>
+ #include <c10/core/impl/LocalDispatchKeySet.h>
++#include <c10/core/SymIntArrayRef.h>
++#include <c10/core/Device.h>
+
+ #include "macros.h"
+
+@@ -27,9 +29,10 @@
+
+ // Indicates whether `tensor` has been constructed in a deferred-init context.
+ TDX_API bool canMaterialize(const at::Tensor& tensor) noexcept;
+-
++TDX_API bool isGenByRandomOp(const at::Tensor& tensor) noexcept;
+ // Materializes `tensor`.
+ TDX_API at::Tensor materializeTensor(const at::Tensor& tensor);
++TDX_API at::Tensor materializeTensorWithLocalShape(const at::Tensor& tensor, c10::IntArrayRef shape, const c10::optional<c10::Device> device = {});
+
+ // Temporarily disables deferred-init.
+ class TDX_API NoDeferredInit {
+Index: src/python/torchdistx/_C.pyi
+<+>UTF-8
+===================================================================
+diff --git a/src/python/torchdistx/_C.pyi b/src/python/torchdistx/_C.pyi
+--- a/src/python/torchdistx/_C.pyi	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
++++ b/src/python/torchdistx/_C.pyi	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+@@ -5,12 +5,17 @@
+ # LICENSE file in the root directory of this source tree.
+
+ import torch
++from torch.types import _int, SymInt, _device
++from collections import Sequence
++from typing import Union, Optional
+
+ def enter_deferred_init() -> None: ...
+ def leave_deferred_init() -> None: ...
+ def enter_fake_mode(fake_mode: bool) -> None: ...
+ def leave_fake_mode() -> None: ...
+ def is_fake(tensor: torch.Tensor) -> bool: ...
++def is_gen_by_random_op(tensor: torch.Tensor) -> bool: ...
+ def can_materialize(tensor: torch.Tensor) -> bool: ...
+ def materialize_tensor(tensor: torch.Tensor) -> torch.Tensor: ...
++def materialize_tensor_with_local_shape(tensor: torch.Tensor, shape: Sequence[Union[_int, SymInt]], device: Optional[Union[_device, str, None]] = None) -> torch.Tensor: ...
+ def meta_like(fake: torch.Tensor) -> torch.Tensor: ...
+Index: src/python/torchdistx/_C/deferred_init.cc
+<+>UTF-8
+===================================================================
+diff --git a/src/python/torchdistx/_C/deferred_init.cc b/src/python/torchdistx/_C/deferred_init.cc
+--- a/src/python/torchdistx/_C/deferred_init.cc	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
++++ b/src/python/torchdistx/_C/deferred_init.cc	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+@@ -8,6 +8,7 @@
+
+ #include <ATen/Tensor.h>
+ #include <c10/core/TensorImpl.h>
++#include <c10/core/SymIntArrayRef.h>
+ #include <torch/csrc/PyInterpreter.h>
+ #include <torch/csrc/autograd/python_variable.h>
+ #include <torch/csrc/utils/pybind.h>
+@@ -94,14 +95,58 @@
+   return makeVariable(Py_TYPE(naked_var), std::move(materialized_data));
+ }
+
++
++// Materializing a tensor in Python requires an extra step. We need to ensure
++// that the materialized tensor has the same Python class (e.g. `Variable` or
++// `Parameter`) as the original tensor.
++// and with dtensor case we need to change the parallized tensor shape
++py::object materializeVariableWithLocalShape(const py::object& var, const py::object &shape, const c10::optional<c10::Device> device) {
++  PyObject* naked_var = var.ptr();
++  auto c_shape = shape.cast<std::vector<int64_t>>();
++
++  if (!THPVariable_Check(naked_var)) {
++    throw TypeError{"`var` has to be a `Variable`, but got `%s`.", Py_TYPE(naked_var)->tp_name};
++  }
++
++  const Tensor& data = THPVariable_Unpack(naked_var);
++
++  auto materialize = [=](const Tensor& tensor, c10::IntArrayRef sp) {
++    py::gil_scoped_release guard{};
++
++    return materializeTensorWithLocalShape(tensor, sp, device);
++  };
++
++  Tensor materialized_data = materialize(data, at::IntArrayRef(c_shape));
++
++  // Check if we have really materialized `data`. Materializing a regular tensor
++  // is a no-op, so we can simply return.
++  if (materialized_data.is_same(data)) {
++    return var;
++  }
++
++  // We might have already materialized `data`. Make sure that we preserve its
++  // identity on the Python side and avoid creating a new Python tensor.
++  c10::optional<PyObject*> opt_materialized_var =
++      materialized_data.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
++  if (opt_materialized_var.has_value()) {
++    return py::reinterpret_borrow<py::object>(*opt_materialized_var);
++  }
++
++  // Otherwise ensure that our materialized tensor has the same Python class as
++  // the original tensor.
++  return makeVariable(Py_TYPE(naked_var), std::move(materialized_data));
++}
++
++
+ }  // namespace
+
+ void initDeferredInitFunctions(py::module& m) {
+   m.def("enter_deferred_init", enterDeferredInit);
+   m.def("leave_deferred_init", leaveDeferredInit);
+-
+   m.def("can_materialize", canMaterialize);
++  m.def("is_gen_by_random_op", isGenByRandomOp);
+   m.def("materialize_tensor", materializeVariable);
++  m.def("materialize_tensor_with_local_shape", materializeVariableWithLocalShape);
+ }
+
+ }  // namespace torchdistx::python
