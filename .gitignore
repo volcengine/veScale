@@ -1,0 +1,26 @@
+/**/.vscode
+/**/.idea
+/**/__pycache__
+/**/.pytest_cache
+/**/*.pyc
+/**/dist
+/**/build
+/**/*.egg-info
+/**/cmake-build-debug
+/**/cmake-build-release
+/**/CMakeLists.txt
+
+# py code style
+/**/.ruff_cache
+
+# tmp files
+/**/*.pt
+/**/*.pt.*
+/**/*.npy
+/**/*.npy.*
+/**/*.tar.gz
+/**/*.json.gz
+/**/*.log
+
+# pre-commit config
+./.pre-commit-config.yaml
