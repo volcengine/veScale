@@ -16,6 +16,7 @@ import torch
 import vescale.dtensor.random as random
 from vescale.dtensor._utils import compute_local_shape, is_zero_out_local_shard
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
+from vescale.dtensor.api import normalize_placements
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.ops.utils import normalize_to_torch_size
 from vescale.dtensor.placement_types import DTensorSpec, Placement, Replicate, TensorMeta
@@ -36,16 +37,11 @@ def _dtensor_init_helper(
     global_shape = normalize_to_torch_size(global_shape)
     assert layout == torch.strided, f"layout={layout} is not supported!"
     torch_stride = torch._prims_common.make_contiguous_strides_for(global_shape)
-    # if device_mesh is None, use the one from mesh resources
+    # get device_mesh
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device = device_mesh.device_type
-    # if placements is None, set default placements to replicated
-    placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
-    # check device_mesh againts placements
-    assert device_mesh.ndim == len(
-        placements
-    ), f"mesh dimension ({device_mesh.ndim}) does not match the length of placements ({len(placements)})!"
-
+    # get placements
+    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, none_as_replicate=True)
     # get local tensor shape
     local_shape = compute_local_shape(global_shape, device_mesh, placements)
     # initialize the local tensor
@@ -84,11 +80,11 @@ def _dtensor_init_helper(
     return DTensor(
         local_tensor=local_tensor,
         device_mesh=device_mesh,
-        placements=tuple(placements),
+        placements=placements,
         shape=global_shape,
         dtype=local_tensor.dtype,
-        stride=torch_stride,
         requires_grad=requires_grad,
+        stride=torch_stride,
     )
 
 

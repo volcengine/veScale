@@ -499,6 +499,33 @@ class DeviceMesh:
             mesh_dim = dim
         return mesh_resources.create_submesh_group(self, mesh_dim)
 
+    def get_mapping_rank(self, other: "DeviceMesh"):
+        """
+        for cross mesh resharding
+        we assume that the mesh is 1,2,4,8
+        the size will have gcd value
+        """
+        mesh_list = self.mesh.view(-1).tolist()
+        index = mesh_list.index(self.get_rank())
+        other_mesh_list = other.mesh.view(-1).tolist()
+        gcd_value = math.gcd(len(mesh_list), len(other_mesh_list))
+        if gcd_value == 1 and len(mesh_list) != 1 and len(other_mesh_list) != 1:
+            raise RuntimeError(f"mesh resharding the wrong shape of device mesh {mesh_list} vs {other_mesh_list}")
+
+        a = len(mesh_list)
+        b = len(other_mesh_list)
+        factor = max(a, b) // min(a, b)
+
+        if a > b:  # group down
+            data = {}
+            for i in range((index // factor) * factor, factor):
+                data.update({mesh_list[index]: other_mesh_list[index // factor]})
+            return data
+        elif a < b:  # group up
+            return [other_mesh_list[i] for i in range(index * factor, (index + 1) * factor)]
+        else:
+            return other_mesh_list[index]
+
 
 def init_device_mesh(
     device_type: str,

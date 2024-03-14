@@ -94,6 +94,7 @@ pointwise_ops = [
     aten.atanh.default,
     aten.atanh.out,
     aten.atanh_.default,
+    aten.argsort.stable,  # (Hongyu): tmp solution
     aten.bitwise_and.Scalar,
     aten.bitwise_and.Scalar_Tensor,
     aten.bitwise_and.Scalar_out,
@@ -282,6 +283,7 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.masked_fill_.Scalar,
     aten.mul.Scalar,
     aten.mul.Tensor,
     aten.mul.out,
@@ -350,6 +352,8 @@ pointwise_ops = [
     aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
+    aten.silu.default,
+    aten.silu.out,
     aten.sin.default,
     aten.sin.out,
     aten.sin_.default,
@@ -359,6 +363,7 @@ pointwise_ops = [
     aten.sinh.default,
     aten.sinh.out,
     aten.sinh_.default,
+    aten.sort.default,  # (Hongyu): tmp solution
     aten.sqrt.default,
     aten.sqrt.out,
     aten.sqrt_.default,
@@ -394,6 +399,7 @@ pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
     aten.sigmoid_backward.default,
+    aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
 ]

@@ -33,7 +33,7 @@ The patch code can be found here: [TorchDistX-Patch](patches/patched_torchdistX_
 #### Install veScale
 
 ```bash
-pushd python && pip3 install -r requirements.txt && pip3 install . e && popd
+pushd python && pip3 install -r requirements.txt && pip3 install -e . && popd
 ```
 
 This will install veScale and its dependencies.
@@ -49,7 +49,7 @@ docker build .
 ```
 It may take a while to build the image.
 
-Once the building process is ready, you can `docker run ` with the id.
+Once the building process is finished, you can `docker run` with the id.
 
 
 

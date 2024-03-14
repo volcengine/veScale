@@ -38,6 +38,18 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 4
 
+    @with_comms
+    def test_device_mesh_mapping(self):
+        mesh_a = DeviceMesh("cuda", [0, 1])
+        mesh_b = DeviceMesh("cuda", [2, 3])
+
+        if self.rank == 0:
+            dim_maping = mesh_a.get_mapping_rank(mesh_b)
+            assert dim_maping == 2
+        elif self.rank == 1:
+            dim_maping = mesh_a.get_mapping_rank(mesh_b)
+            assert dim_maping == 3
+
     def test_init_default_pgroup(self):
         def _get_device_type():
             if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size and is_nccl_available():

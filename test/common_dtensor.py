@@ -35,33 +35,19 @@ from vescale.dtensor.placement_types import Placement, DTensorSpec
 # add new skipped test exit code
 TEST_SKIPS["torch-version-2.2"] = TestSkip(90, "Need torch version bigger than 2.2")
 
+VALID_DEVICE_TYPE = ("cuda", "cpu", "meta")
+VALID_PG_BACKEND = ("nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "meta")
+
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
-
 # We use this as a proxy for "multiple GPUs exist"
 if torch.cuda.is_available() and torch.cuda.device_count() > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
 
 T = TypeVar("T")
-
-
-class MLPModule(torch.nn.Module):
-    def __init__(self, device):
-        super().__init__()
-        torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 10, device=device)
-
-    def forward(self, x):
-        return self.net2(self.relu(self.net1(x)))
-
-    def reset_parameters(self):
-        self.net1.reset_parameters()
-        self.net2.reset_parameters()
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -133,20 +119,34 @@ class DTensorTestBase(MultiProcessTestCase):
         return NUM_DEVICES
 
     @property
+    def device_type(self) -> str:
+        return getattr(self, "_device_type", DEVICE_TYPE)
+
+    @device_type.setter
+    def device_type(self, value: str):
+        assert value in VALID_DEVICE_TYPE
+        self._device_type = value
+
+    @property
     def backend(self) -> str:
-        return PG_BACKEND
+        return getattr(self, "_backend", PG_BACKEND)
+
+    @backend.setter
+    def backend(self, value: str):
+        assert value in VALID_PG_BACKEND
+        self._backend = value
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "meta"]:
+        if self.backend not in VALID_PG_BACKEND:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
-        if self.backend == "meta":  # meta backend to fake pg
+        if self.backend == "meta":  # meta backend to fake pg # NOTE: upstream does not work
             store = fake_pg.FakeStore()
             dist.init_process_group(
                 backend="fake",
@@ -198,37 +198,101 @@ class DTensorTestBase(MultiProcessTestCase):
 TestFunc = Callable[[object], object]
 
 
-# wrapper to initialize comms (processgroup)
+# wrapper to initialize comms (process group)
 def with_comms(func: TestFunc) -> TestFunc:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:  # type: ignore[misc]
-        # if backend not specified, and cuda available, then use nccl, else gloo
+        # save original device & backend
+        origin_device_type = self.device_type
+        origin_backend = self.backend
+
+        # auto select device & backend
         if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
             self.device_type = "cuda"
+            self.backend = "nccl"
         else:
             self.device_type = "cpu"
+            self.backend = "gloo"
 
+        # launch
         self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
+        # restore context
+        self.device_type = origin_device_type
+        self.backend = origin_backend
+
     return wrapper
 
 
-# wrapper to initialize comms (processgroup) within simulator
+# wrapper to initialize comms (process group) within simulator
 def with_comms_simulator(func: TestFunc) -> TestFunc:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:  # type: ignore[misc]
+        # save original device & backend
+        origin_device_type = self.device_type
+
+        # change to given device & backend
         self.device_type = "meta"
+
+        # launch
         self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
+        # restore original device & backend
+        self.device_type = origin_device_type
+
     return wrapper
+
+
+# wrapper to initialize comms (process group) for specific device & backend
+def with_comms_device(device_type: str) -> Callable:
+    """
+    >>> # xdoctest: +SKIP
+    >>> @with_comms_device(device_type="cpu")
+    >>> def test_run_cpu(self):
+    >>>   ...
+    """
+    assert device_type in VALID_DEVICE_TYPE
+
+    def decorator(func: TestFunc) -> TestFunc:
+        assert func is not None
+
+        @wraps(func)  # pyre-ignore[6]
+        def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:  # type: ignore[misc]
+            # save original device & backend
+            origin_device_type = self.device_type
+            origin_backend = self.backend
+
+            # change to given device & backend
+            self.device_type = device_type
+            if self.device_type == "cuda":
+                self.backend = "nccl"
+            elif self.device_type == "cpu":
+                self.backend = "gloo"
+            elif self.device_type == "meta":
+                self.backend = PG_BACKEND
+            else:
+                raise ValueError(f"Device type {self.device_type} not supported!")
+
+            # launch
+            self.init_pg()
+            func(self, *args, **kwargs)  # type: ignore[misc]
+            self.destroy_pg()
+
+            # restore original device & backend
+            self.device_type = origin_device_type
+            self.backend = origin_backend
+
+        return wrapper
+
+    return decorator
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
