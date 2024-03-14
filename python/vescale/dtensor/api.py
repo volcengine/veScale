@@ -8,19 +8,20 @@
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
+import os
 import warnings
-from typing import List, Optional, Sequence, Tuple, Union, cast, Callable
+from typing import List, Optional, Sequence, Tuple, Union, cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
 
 import vescale.dtensor.random as random
 from vescale.dtensor._collective_utils import mesh_broadcast, mesh_scatter
-from vescale.dtensor._utils import compute_global_tensor_info, gather_local_tensor_shape, compute_local_shape
+from vescale.dtensor._utils import compute_global_tensor_info, gather_local_tensor_shape
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.ops.utils import normalize_dims
-from vescale.dtensor.placement_types import DTensorSpec, InterleavedShard, Placement, Replicate, Shard, TensorMeta
+from vescale.dtensor.placement_types import DTensorSpec, InterleavedShard, Placement, Replicate, Shard
 from vescale.dtensor.random import OffsetBasedRNGTracker, is_rng_supported_mesh
 from vescale.dtensor.redistribute import (
     Redistribute,
@@ -28,10 +29,7 @@ from vescale.dtensor.redistribute import (
     _scatter_tensor_by_shard,
     redistribute_local_tensor,
 )
-import os
-from torchdistx.deferred_init import deferred_init as _deferred_init
-from torchdistx.deferred_init import is_deferred as _is_deferred
-from torchdistx.deferred_init import _C
+
 
 __all__ = [
     "distribute_tensor",
@@ -39,21 +37,19 @@ __all__ = [
     "from_local",
     "redistribute_dtensor",
     "normalize_placements",
-    "deferred_init",
-    "is_deferred",
-    "materialize_dtensor",
 ]
 
 VESCALE_DISABLE_RUN_CHECK = os.environ.get("VESCALE_DISABLE_RUN_CHECK", "0") == "1"
 
 
-def normalize_placements(placements: Optional[Sequence[Placement]], mesh_ndim: int):
+def normalize_placements(
+    placements: Optional[Sequence[Placement]], mesh_ndim: int, none_as_replicate: bool = False
+) -> Optional[Tuple[Placement]]:
     """
     normalize a placements to be valid.
     """
     if placements is None:
-        # warnings.warn("`placements` is None. It will have be LOCAL but not tested.", UserWarning)
-        return None
+        return tuple(Replicate() for _ in range(mesh_ndim)) if none_as_replicate else None
 
     if len(placements) > mesh_ndim:
         raise ValueError(f"`placements` (len={len(placements)}) have larger length than `mesh_ndim` ({mesh_ndim})!")
@@ -321,7 +317,7 @@ def from_local(
         local_tensor = local_tensor.to(device_type)
 
     # validate placements
-    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim)
+    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, none_as_replicate=True)
 
     # TODO: fix later
     # if any(p.is_partial() for p in placements if p is not None):
@@ -376,7 +372,7 @@ def distribute_tensor(
     placements: Optional[Sequence[Placement]] = None,
 ) -> "DTensor":
     """
-    Distribute a torch.Tensor to the `device_mesh` according to the `placements`
+    Distribute a global `torch.Tensor` to the `device_mesh` according to the `placements`
     specified. The rank of `device_mesh` and `placements` must be the same.
 
     Args:
@@ -422,7 +418,7 @@ def distribute_tensor(
         tensor = tensor.to(device_type)
 
     # validate placements
-    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim)
+    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, none_as_replicate=True)
 
     # validate tensor type
     if isinstance(tensor, DTensor):
@@ -671,61 +667,3 @@ def vescale_reduce_scatter(
         dst_placements[mesh_dim] = Shard(scatter_dim)
 
     return redistribute_dtensor(d_tensor, device_mesh, tuple(dst_placements), async_op)
-
-
-def materialize_dtensor(
-    tensor: torch.Tensor,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
-):
-    if _is_deferred(tensor):
-        global_shape = tensor.shape
-        assert tensor.layout == torch.strided, f"layout={tensor.layout} is not supported!"
-        torch_stride = torch._prims_common.make_contiguous_strides_for(global_shape)
-
-        # if device_mesh is None, use the one from mesh resources
-        device_mesh = device_mesh or mesh_resources.get_current_mesh()
-        device = device_mesh.device_type
-        # if placements is None, set default placements to replicated
-        placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
-        # check device_mesh againts placements
-        assert device_mesh.ndim == len(
-            placements
-        ), f"mesh dimension ({device_mesh.ndim}) does not match the length of placements ({len(placements)})!"
-
-        # get local tensor shape
-        local_shape = compute_local_shape(global_shape, device_mesh, placements)
-        torch_device = torch.device(device)
-
-        if _C.is_gen_by_random_op(tensor):
-            tensor_meta = TensorMeta(global_shape, (0,), tensor.dtype)
-            spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
-
-            assert random.is_rng_supported_mesh(
-                device_mesh
-            ), "currently, random DTensor only support cuda/cuda=like device!"
-            if not random._rng_tracker:
-                random._rng_tracker = random.OffsetBasedRNGTracker()
-            assert random._rng_tracker is not None
-            with random._rng_tracker._distribute_region(spec):
-                tensor = _C.materialize_tensor_with_local_shape(tensor, local_shape, torch_device)
-        else:
-            tensor = _C.materialize_tensor_with_local_shape(tensor, local_shape, torch_device)
-
-    return DTensor(
-        local_tensor=tensor,
-        device_mesh=device_mesh,
-        placements=tuple(placements),
-        shape=global_shape,
-        dtype=tensor.dtype,
-        stride=torch_stride,
-        requires_grad=tensor.requires_grad,
-    )
-
-
-def deferred_init(op: Callable, *args, **kwargs):
-    return _deferred_init(op, *args, **kwargs)
-
-
-def is_deferred(tensor: torch.Tensor):
-    return _is_deferred(tensor)

@@ -39,6 +39,27 @@ class Placement:
     def is_partial(self) -> bool:
         return isinstance(self, Partial)
 
+    def serialize_to_tensor(self, device) -> torch.Tensor:
+        if self.is_replicate():
+            return torch.tensor([0, 0, 0], device=device, dtype=torch.int64)
+        elif self.is_partial():
+            return torch.tensor([1, 0, 0], device=device, dtype=torch.int64)
+        elif self.is_shard():
+            return torch.tensor([2, self.dim, 0], device=device, dtype=torch.int64)
+        elif self.is_interleaved_shard():
+            return torch.tensor([3, self.dim, self.interleaved_size], device=device, dtype=torch.int64)
+
+    @staticmethod
+    def serialize_from_tensor(tensor: torch.Tensor):
+        if tensor[0] == 0:
+            return Replicate()
+        elif tensor[0] == 1:
+            return Partial()
+        elif tensor[0] == 2:
+            return Shard(dim=tensor[1])
+        elif tensor[0] == 3:
+            return InterleavedShard(dim=tensor[1], interleaved_size=tensor[2])
+
 
 class Shard(Placement):
     # shard placement, shard on a dim

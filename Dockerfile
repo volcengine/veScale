@@ -37,5 +37,5 @@ RUN pip3 install --no-cache-dir packaging \
     && pip3 install --no-cache-dir tqdm \
     && pip3 install --no-cache-dir optree \
     && pip3 install --no-cache-dir psutil \
-    && pip3 install --no-cache-dir transformers \
+    && pip3 install --no-cache-dir transformers==4.37.2 \
     && pip3 install --no-cache-dir accelerate

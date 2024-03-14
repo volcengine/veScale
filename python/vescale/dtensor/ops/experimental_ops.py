@@ -24,9 +24,7 @@ from vescale.dtensor._utils import compute_local_shape
 aten = torch.ops.aten
 
 
-@register_prop_rule(aten.slice_backward.default)
-def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
-    grad_output_spec, input_sizes, dim, start, end, step = op_schema.args_schema
+def slice_select_backward(op_schema, grad_output_spec, input_sizes, dim, start, end, step) -> OutputSharding:
     assert isinstance(grad_output_spec, DTensorSpec)
     assert isinstance(input_sizes, List)
     assert grad_output_spec.tensor_meta is not None
@@ -62,6 +60,18 @@ def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
             needs_redistribute=True,
         )
     return OutputSharding(grad_input_spec)
+
+
+@register_prop_rule(aten.slice_backward.default)
+def slice_backward_rules(op_schema: OpSchema) -> OutputSharding:
+    grad_output_spec, input_sizes, dim, start, end, step = op_schema.args_schema
+    return slice_select_backward(op_schema, grad_output_spec, input_sizes, dim, start, end, step)
+
+
+@register_prop_rule(aten.select_backward.default)
+def index_select_backward(op_schema: OpSchema) -> OutputSharding:
+    grad_output_spec, input_sizes, dim, start_index = op_schema.args_schema
+    return slice_select_backward(op_schema, grad_output_spec, input_sizes, dim, start_index, start_index + 1, 1)
 
 
 @register_prop_rule(aten.nll_loss_forward.default)

@@ -455,7 +455,7 @@ def propagate_shape_and_sharding(
     led to their inconsistent behavior have been dealt in ``vescale_view_ops.py``.
     """
     assert len(in_shard) == len(mesh_sizes)
-    sharded_in_dims: Set[int] = {s.dim for s in in_shard if isinstance(s, (Shard, InterleavedShard))}
+    sharded_in_dims: Set[int] = {s.dim for s in in_shard if s.is_shard()}
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     shardable_dims: torch.Tensor = torch.ones((len(local_in_shape), len(mesh_sizes)), dtype=torch.bool)
 
@@ -542,7 +542,7 @@ def propagate_shape_and_sharding(
             dim_map[in_dim.input_dim] = dim
 
     needs_reshard = any(
-        isinstance(placement, (Shard, InterleavedShard)) and not shardable_dims[placement.dim][mesh_dim]
+        placement.is_shard() and not shardable_dims[placement.dim][mesh_dim]
         for mesh_dim, placement in enumerate(in_shard)
     )
 
@@ -550,10 +550,10 @@ def propagate_shape_and_sharding(
     if not needs_reshard:
         output_placements = []
         for s in in_shard:
-            if isinstance(s, Shard):
-                output_placements.append(Shard(dim_map[s.dim]))
-            elif isinstance(s, InterleavedShard):
+            if isinstance(s, InterleavedShard):
                 output_placements.append(InterleavedShard(dim_map[s.dim], s.interleaved_size))
+            elif isinstance(s, Shard):
+                output_placements.append(Shard(dim_map[s.dim]))
             else:
                 output_placements.append(s)
         output_placements = tuple(output_placements)

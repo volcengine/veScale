@@ -51,7 +51,7 @@ def hack_for_special_op(
         new_args[2] = dtensor.DTensor.from_local(new_args[2], device_mesh, sharding)
         return tuple(new_args), kwargs
     elif (
-        str(op_call) in ["aten.scatter_.value", "aten.scatter.value"]
+        str(op_call) in ["aten.scatter_.value", "aten.scatter.value", "aten.scatter_.src", "aten.scatter.src"]
         and not isinstance(args[0], dtensor.DTensor)
         and isinstance(args[0], torch.Tensor)
         and isinstance(args[2], dtensor.DTensor)

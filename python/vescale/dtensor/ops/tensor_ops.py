@@ -343,14 +343,14 @@ def index_select(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     return OpStrategy([PlacementStrategy(output_spec)])
 
 
-@register_op_strategy([aten.scatter_.value, aten.scatter.value])
+@register_op_strategy([aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src])
 def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     value, _, index, src = op_schema.args_schema
     value_target = DTensorSpec(mesh, [Replicate()], value.strategies[0].output_spec.tensor_meta)
     index_target = DTensorSpec(mesh, [Replicate()], index.strategies[0].output_spec.tensor_meta)
     src_target = (
         DTensorSpec(mesh, [Replicate()], src.strategies[0].output_spec.tensor_meta)
-        if isinstance(src, DTensorSpec)
+        if isinstance(src, OpStrategy)
         else src
     )
 
@@ -361,7 +361,7 @@ def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # TODO: change to vescale stype redistribution
     redistribute_index_costs.append(generate_redistribute_costs(index, index_target))
     redistribute_costs = [[x + y for x, y in zip(redistribute_value_costs[0], redistribute_index_costs[0])]]
-    if isinstance(src, DTensorSpec):
+    if isinstance(src, OpStrategy):
         redistribute_src_costs = []
         # TODO: change to vescale stype redistribution
         redistribute_src_costs.append(generate_redistribute_costs(src, src_target))
@@ -369,7 +369,7 @@ def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     output_spec = DTensorSpec(mesh=mesh, placements=[Replicate()])
     input_specs = [value_target, index_target]
-    if isinstance(src, DTensorSpec):
+    if isinstance(src, OpStrategy):
         input_specs.append(src_target)
     return OpStrategy(
         [
