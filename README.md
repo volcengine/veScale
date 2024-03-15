@@ -2,7 +2,7 @@
 
 ## Coming Soon
 
-We are refactoring our internal LLM training system components to meet open source standard. The tentative timeline is as follows:
+We are refactoring our [internal LLM training system](https://arxiv.org/abs/2402.15627) components to meet open source standard. The tentative timeline is as follows:
 
 1. by mid April, 4D parallelism (tensor parallelism, sequence parallelism, data parallelism and ZERO) examples for nanoGPT, Llama2 and Mixtral models
 2. by end of May, fast checkpointing system
