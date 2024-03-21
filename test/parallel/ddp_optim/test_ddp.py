@@ -33,7 +33,7 @@ from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.base_optimizer import BasicOptimizer, BaseOptimizerHook
 
 from common_dtensor import DTensorTestBase, with_comms
-from test.test_models.mlp import (
+from test_models.mlp import (
     MLP,
     HIDDEN_DIM,
     BSZ,

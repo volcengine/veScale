@@ -33,7 +33,7 @@ from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 
 from parallel.ddp_optim.test_ddp import get_unfied_param_and_data
-from test.test_models.mlp import (
+from test_models.mlp import (
     MLP,
     HIDDEN_DIM,
     BSZ,
