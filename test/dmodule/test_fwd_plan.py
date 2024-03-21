@@ -87,37 +87,37 @@ class FwdPlanTestWNoArgs(FwdPlanTestBase):
 
     def _test_empty_placements(self):
         fwd_plan = {".input": []}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         out = dmodule()
         self.assertIsNone(out)
 
     def _test_none_placement(self):
         fwd_plan = {".input": [None]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         with self.assertWarns(UserWarning) as _:
             _ = dmodule()
 
     def _test_incorrect_fwd_plan(self):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)], [Replicate()]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         with self.assertWarns(UserWarning) as _:
             _ = dmodule()
 
     def _test_empty_dict(self):
         fwd_plan = {".input": {}}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         out = dmodule()
         self.assertIsNone(out)
 
     def _test_non_empty_dict(self):
         fwd_plan = {".input": {"x": None}}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         with self.assertWarns(UserWarning) as _:
             _ = dmodule()
 
     def _test_non_empty_dict2(self):
         fwd_plan = {".input": {"x": [Shard(0)]}}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         with self.assertWarns(UserWarning) as _:
             _ = dmodule()
 
@@ -140,7 +140,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def test_seq_fwd_plan(self, model):
         fwd_plan = {".input": [[Shard(0)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         expected_t = [Shard(0)]
 
@@ -163,7 +163,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def test_dict_fwd_plan(self, model):
         fwd_plan = {".input": {"a": [Shard(0)]}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a = torch.ones((2, 2))
         expected_t = [Shard(0)]
 
@@ -176,7 +176,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_empty_seq_fwd_plan(self, model):
         fwd_plan = {".input": []}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         expected_t = [torch.Tensor]
 
@@ -186,7 +186,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_empty_dict_fwd_plan(self, model):
         fwd_plan = {".input": {}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         expected_t = [torch.Tensor]
 
@@ -197,7 +197,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     def _test_incorrect_seq_fwd_plan1(self, model):
         fwd_plan = {".input": {"a": [Shard(0)], "_": None}}
 
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         with self.assertWarns(UserWarning) as _:
             _ = dmodule(a)
@@ -206,7 +206,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     def _test_incorrect_dict_fwd_plan1(self, model):
         fwd_plan = {".input": [[Shard(0)], None]}
 
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         with self.assertWarns(UserWarning) as _:
             _ = dmodule(a)
@@ -215,7 +215,7 @@ class FwdPlanTestWSimpleArgs1AndDefaultArgs1(FwdPlanTestBase):
     def _test_incorrect_seq_fwd_plan2(self, model):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
 
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         with self.assertWarns(UserWarning) as _:
             _ = dmodule(a)
@@ -242,7 +242,7 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def test_seq_fwd_plan(self, model):
         fwd_plan = {".input": [[Shard(0)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         expected_t = [Shard(0)]
 
@@ -262,14 +262,13 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
             _ = dmodule(b=b, a=a)
 
         if model is self.DefaultKwOnlyArgs1:
-            with self.assertWarns(UserWarning):
-                self.assertIsNone(dmodule())
+            self.assertIsNone(dmodule())
 
     @with_comms
     @parametrize("model", test_type_candidates)
     def test_dict_fwd_plan(self, model):
         fwd_plan = {".input": {"a": [Shard(0)]}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a = torch.ones((2, 2))
         expected_t = [Shard(0)]
 
@@ -280,13 +279,12 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
         self.assert_helper((out,), expected_t)
 
         if model is self.DefaultKwOnlyArgs1:
-            with self.assertWarns(UserWarning):
-                self.assertIsNone(dmodule())
+            self.assertIsNone(dmodule())
 
     @parametrize("model", test_type_candidates)
     def _test_empty_seq_fwd_plan(self, model):
         fwd_plan = {".input": []}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         expected_t = [torch.Tensor]
 
@@ -302,7 +300,7 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_empty_dict_fwd_plan(self, model):
         fwd_plan = {".input": {}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         expected_t = [torch.Tensor]
 
@@ -319,7 +317,7 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
     def _test_incorrect_seq_fwd_plan1(self, model):
         fwd_plan = {".input": [[Shard(0)], None]}
 
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         with self.assertRaises(TypeError) as _:
             _ = dmodule(a)
@@ -331,7 +329,7 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
     def _test_incorrect_seq_fwd_plan2(self, model):
         fwd_plan = {".input": [[Shard(0)], None]}
 
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         with self.assertRaises(TypeError) as _:
             _ = dmodule(a)
@@ -343,7 +341,7 @@ class FwdPlanTestWKwOnlyArgs1AndDefaultKwOnlyArgs1(FwdPlanTestBase):
     def _test_incorrect_seq_fwd_plan3(self, model):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
 
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2
         with self.assertRaises(TypeError) as _:
             _ = dmodule(a)
@@ -372,7 +370,7 @@ class FwdPlanTestWVarPositionAndSimpleArgs1WithVarPosition(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_seq_fwd_plan_no_var_pos(self, model):
         fwd_plan = {".input": [[Shard(0)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0)]
 
@@ -382,7 +380,7 @@ class FwdPlanTestWVarPositionAndSimpleArgs1WithVarPosition(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_seq_fwd_plan(self, model):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1)]
 
@@ -398,7 +396,7 @@ class FwdPlanTestWVarPositionAndSimpleArgs1WithVarPosition(FwdPlanTestBase):
             fwd_plan = {".input": {"args": [[Shard(0)], [Shard(1)]]}}
         else:
             fwd_plan = {".input": {"a": [Shard(0)], "args": [[Shard(1)]]}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1)]
 
@@ -418,7 +416,7 @@ class FwdPlanTestWVarPositionAndSimpleArgs1WithVarPosition(FwdPlanTestBase):
                     "a": [Shard(0)],
                 }
             }
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0)]
 
@@ -428,7 +426,7 @@ class FwdPlanTestWVarPositionAndSimpleArgs1WithVarPosition(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_mixed_input_type_w_seq_plan(self, model):
         fwd_plan = {".input": [None, [Shard(0)], None, [Shard(1)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [str, Shard(0), float, Shard(1), type(c), type(bool)]
         out = dmodule("string", a, 1.0, b, c, bool)
@@ -440,7 +438,7 @@ class FwdPlanTestWVarPositionAndSimpleArgs1WithVarPosition(FwdPlanTestBase):
             fwd_plan = {".input": {"args": [None, [Shard(0)], None, [Shard(1)]]}}
         else:
             fwd_plan = {".input": {"a": None, "args": [[Shard(0)], None, [Shard(1)]]}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [str, Shard(0), float, Shard(1), type(c), type(bool)]
         out = dmodule("string", a, 1.0, b, c, bool)
@@ -467,7 +465,7 @@ class FwdPlanTestWVarKeywordAndSimpleArgs1WithVarKeyword(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_seq_fwd_plan_nokwargs(self, model):
         fwd_plan = {".input": [[Shard(0)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0)]
 
@@ -480,7 +478,7 @@ class FwdPlanTestWVarKeywordAndSimpleArgs1WithVarKeyword(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_seq_fwd_plan(self, model):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -497,7 +495,7 @@ class FwdPlanTestWVarKeywordAndSimpleArgs1WithVarKeyword(FwdPlanTestBase):
                 "a": [Shard(0)],
             }
         }
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0)]
 
@@ -507,7 +505,7 @@ class FwdPlanTestWVarKeywordAndSimpleArgs1WithVarKeyword(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_dict_fwd_plan(self, model):
         fwd_plan = {".input": {"a": [Shard(0)], "b": [Shard(1)]}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -520,7 +518,7 @@ class FwdPlanTestWVarKeywordAndSimpleArgs1WithVarKeyword(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_mixed_input_type_w_seq_plan(self, model):
         fwd_plan = {".input": [[Shard(0)], None, None, [Shard(1)]]}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), str, float, Shard(1), type(c), type(bool)]
         out = dmodule(a=a, s="string", i=1.0, b=b, c=c, bo=bool)
@@ -529,7 +527,7 @@ class FwdPlanTestWVarKeywordAndSimpleArgs1WithVarKeyword(FwdPlanTestBase):
     @parametrize("model", test_type_candidates)
     def _test_mixed_input_type_w_dict_plan(self, model):
         fwd_plan = {".input": {"a": [Shard(0)], "b": [Shard(1)]}}
-        dmodule = parallelize_module(model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), str, float, Shard(1), type(c), type(bool)]
         out = dmodule(a=a, s="string", i=1.0, b=b, c=c, bo=bool)
@@ -548,7 +546,7 @@ class FwdPlanTestWVarPositionDefaultArgs(FwdPlanTestBase):
 
     def _test_seq_fwd_plan0(self):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -557,7 +555,7 @@ class FwdPlanTestWVarPositionDefaultArgs(FwdPlanTestBase):
 
     def _test_seq_fwd_plan1(self):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -566,7 +564,7 @@ class FwdPlanTestWVarPositionDefaultArgs(FwdPlanTestBase):
 
     def _test_dict_fwd_plan(self):
         fwd_plan = {".input": {"a": None, "args": [[Shard(0)], [Shard(1)]]}}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -586,7 +584,7 @@ class FwdPlanTestWDefaultArgsVarPosition(FwdPlanTestBase):
 
     def _test_seq_fwd_plan0(self):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -595,7 +593,7 @@ class FwdPlanTestWDefaultArgsVarPosition(FwdPlanTestBase):
 
     def _test_seq_fwd_plan1(self):
         fwd_plan = {".input": [None, [Shard(1)]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [torch.Tensor, Shard(1), torch.Tensor]
 
@@ -604,7 +602,7 @@ class FwdPlanTestWDefaultArgsVarPosition(FwdPlanTestBase):
 
     def _test_dict_fwd_plan(self):
         fwd_plan = {".input": {"a": [Shard(0)], "args": [[Shard(1)]]}}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -624,7 +622,7 @@ class FwdPlanTestWDefaultArgsVarkwarg(FwdPlanTestBase):
 
     def _test_seq_fwd_plan(self):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -633,7 +631,7 @@ class FwdPlanTestWDefaultArgsVarkwarg(FwdPlanTestBase):
 
     def _test_dict_fwd_plan(self):
         fwd_plan = {".input": {"a": [Shard(0)], "b": [Shard(1)]}}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), torch.Tensor]
 
@@ -654,7 +652,7 @@ class FwdPlanTestWSimpleArgs3(FwdPlanTestBase):
     @with_comms
     def test_seq_fwd_plan(self):
         fwd_plan = {".input": [[Shard(0)], [Shard(1)], [Replicate()]]}
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         a, b, c = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
         expected_t = [Shard(0), Shard(1), Replicate()]
 
@@ -691,7 +689,7 @@ class FwdPlanTestWMixedArgs1(FwdPlanTestBase):
         fwd_plan = {
             ".input": [[Shard(0)], [Shard(1)], None, None, [Replicate()], None, [Shard(0)], [Replicate()], [Shard(1)]]
         }
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         base = torch.ones((2, 2))
         a, b, c, d, e, f, g, h, i, j, k = (base * (i + 1) for i in range(11))
         expected_t = [Shard(0), Shard(1), torch.Tensor, float, Replicate(), None, Shard(0), Replicate(), Shard(1)]
@@ -715,7 +713,7 @@ class FwdPlanTestWMixedArgs1(FwdPlanTestBase):
                 "i": [Shard(1)],
             }
         }
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         base = torch.ones((2, 2))
         a, b, c, d, e, f, g, h, i, j, k = (base * (i + 1) for i in range(11))
         expected_t = [Shard(0), Shard(1), torch.Tensor, float, Replicate(), None, Shard(0), Replicate(), Shard(1)]
@@ -749,7 +747,7 @@ class FwdPlanTestWMixedArgs2(FwdPlanTestBase):
                 [Shard(1)],  # kwargs[1]
             ]
         }
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         base = torch.ones((2, 2))
         a, b, c, d, e, f, g, h, i, j, k = (base * (i + 1) for i in range(11))
         expected_t = [
@@ -788,7 +786,7 @@ class FwdPlanTestWMixedArgs2(FwdPlanTestBase):
                 "i": [Shard(1)],  # kwargs[1]
             }
         }
-        dmodule = parallelize_module(self.model(), self.device_mesh, {}, fwd_plan)
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
         base = torch.ones((2, 2))
         a, b, c, d, e, f, g, h, i, j, k = (base * (i + 1) for i in range(11))
         expected_t = [

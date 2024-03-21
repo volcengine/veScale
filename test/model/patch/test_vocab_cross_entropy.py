@@ -65,7 +65,7 @@ class VocabCrossEntropyTest(DTensorTestBase):
         dmodel = VocabCrossEntropy()
         param_sharding_plan = {}
         fwd_resharding_plan = {".input": [[Replicate()], [Replicate()]]}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         _ = dmodel(input_tensor, input_label)
         patched_forward.assert_not_called()
 
@@ -92,7 +92,7 @@ class VocabCrossEntropyTest(DTensorTestBase):
         dmodel = VocabCrossEntropy()
         param_sharding_plan = {}
         fwd_resharding_plan = {".input": [[Shard(1)], [Replicate()]]}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         vescale_out = dmodel(d_input_tensor.view(-1, VOCAB), d_input_label)
         vescale_out = vescale_out.redistribute(placements=[Replicate()]).to_local()
         loss = vescale_out.mean()

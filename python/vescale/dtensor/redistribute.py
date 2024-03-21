@@ -462,6 +462,7 @@ class Redistribute(torch.autograd.Function):
 
         local_tensor = input._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec, async_op)
+        output.requires_grad_(input.requires_grad)
 
         return dtensor.DTensor(
             output,

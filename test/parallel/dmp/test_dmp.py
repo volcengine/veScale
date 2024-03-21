@@ -331,15 +331,13 @@ class TestDebug(DTensorTestBase):
 
         model = SimpleMlp(4)
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        model, device_mesh, root_param_plan, root_fwd_plan = auto_parallelize_module(
-            model, mesh, policy="MEGATRON", plan_only=True
-        )
+        model, device_mesh, sharding_plan = auto_parallelize_module(model, mesh, policy="MEGATRON", plan_only=True)
 
         if self.rank == 0:
-            print(f"\n root_param_plan: {root_param_plan}")
-            print(f"\n root_fwd_plan: {root_fwd_plan}")
+            print(f"\n root_param_plan: {sharding_plan['parameter']}")
+            print(f"\n root_fwd_plan: {sharding_plan['forward']}")
 
-        parallelize_module(model, device_mesh, root_param_plan, root_fwd_plan)
+        parallelize_module(model, device_mesh, sharding_plan)
 
         if self.rank == 0:
             device_mesh, used_param_plan, used_fwd_plan = model.dump_mesh_plans()
@@ -357,7 +355,7 @@ class TestSetPlan(DTensorTestBase):
                 self.fc1 = nn.Linear(size, size)
                 self.fc2 = nn.Linear(size, size)
 
-        _, _, base_param_plan, base_fwd_plan = auto_parallelize_module(BaselineMLP(), policy="MEGATRON", plan_only=True)
+        _, _, base_sharding_plan = auto_parallelize_module(BaselineMLP(), policy="MEGATRON", plan_only=True)
 
         class SetNoneNoneMLP(nn.Module):
             def __init__(self, size=4):
@@ -391,23 +389,21 @@ class TestSetPlan(DTensorTestBase):
                 set_plan_overriding_policy(self, {"fc2.weight": "FAKED"}, {"output": "FAKED"})
                 # --> both become these
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(
-            SetNoneNoneMLP(), policy="MEGATRON", plan_only=True
-        )
-        self.assertTrue(dut_param_plan == base_param_plan)
-        self.assertTrue(dut_fwd_plan == base_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetNoneNoneMLP(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == base_sharding_plan["parameter"])
+        self.assertTrue(dut_sharding_plan["forward"] == base_sharding_plan["forward"])
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetParamMLP(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == {"fc2.weight": "FAKED"})
-        self.assertTrue(dut_fwd_plan == base_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetParamMLP(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == {"fc2.weight": "FAKED"})
+        self.assertTrue(dut_sharding_plan["forward"] == base_sharding_plan["forward"])
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetFwdMLP(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == base_param_plan)
-        self.assertTrue(dut_fwd_plan == {"output": "FAKED"})
+        _, _, dut_sharding_plan = auto_parallelize_module(SetFwdMLP(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == base_sharding_plan["parameter"])
+        self.assertTrue(dut_sharding_plan["forward"] == {"output": "FAKED"})
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetBothMLP(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == {"fc2.weight": "FAKED"})
-        self.assertTrue(dut_fwd_plan == {"output": "FAKED"})
+        _, _, dut_sharding_plan = auto_parallelize_module(SetBothMLP(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == {"fc2.weight": "FAKED"})
+        self.assertTrue(dut_sharding_plan["forward"] == {"output": "FAKED"})
 
     def test_set_plan_sub_level(self):
         def update_subplan(root_plan: Dict, sub_prefix: str, sub_plan: Dict) -> Dict:
@@ -427,7 +423,7 @@ class TestSetPlan(DTensorTestBase):
                 self.fc1 = nn.Linear(size, size)
                 self.fc2 = nn.Linear(size, size)
 
-        _, _, base_param_plan, base_fwd_plan = auto_parallelize_module(BaselineMLP(), policy="MEGATRON", plan_only=True)
+        _, _, base_sharding_plan = auto_parallelize_module(BaselineMLP(), policy="MEGATRON", plan_only=True)
 
         class SetSubNoneNoneMLP(nn.Module):
             def __init__(self, size=4):
@@ -461,27 +457,23 @@ class TestSetPlan(DTensorTestBase):
                 set_plan_overriding_policy(self.fc2, {"weight": "FAKED"}, {"output": "FAKED"})
                 # --> only fc2's two plan become these
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(
-            SetSubNoneNoneMLP(), policy="MEGATRON", plan_only=True
-        )
-        self.assertTrue(dut_param_plan == base_param_plan)
-        self.assertTrue(dut_fwd_plan == base_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetSubNoneNoneMLP(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == base_sharding_plan["parameter"])
+        self.assertTrue(dut_sharding_plan["forward"] == base_sharding_plan["forward"])
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(
-            SetSubParamMLP(), policy="MEGATRON", plan_only=True
-        )
-        gold_param_plan = update_subplan(base_param_plan, "fc2", {"weight": "FAKED"})
-        self.assertTrue(dut_param_plan == gold_param_plan)
-        self.assertTrue(dut_fwd_plan == base_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetSubParamMLP(), policy="MEGATRON", plan_only=True)
+        gold_param_plan = update_subplan(base_sharding_plan["parameter"], "fc2", {"weight": "FAKED"})
+        self.assertTrue(dut_sharding_plan["parameter"] == gold_param_plan)
+        self.assertTrue(dut_sharding_plan["forward"] == base_sharding_plan["forward"])
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetSubFwdMLP(), policy="MEGATRON", plan_only=True)
-        gold_fwd_plan = update_subplan(base_fwd_plan, "fc2", {"output": "FAKED"})
-        self.assertTrue(dut_param_plan == base_param_plan)
-        self.assertTrue(dut_fwd_plan == gold_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetSubFwdMLP(), policy="MEGATRON", plan_only=True)
+        gold_fwd_plan = update_subplan(base_sharding_plan["forward"], "fc2", {"output": "FAKED"})
+        self.assertTrue(dut_sharding_plan["parameter"] == base_sharding_plan["parameter"])
+        self.assertTrue(dut_sharding_plan["forward"] == gold_fwd_plan)
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetSubBothMLP(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == gold_param_plan)
-        self.assertTrue(dut_fwd_plan == gold_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetSubBothMLP(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == gold_param_plan)
+        self.assertTrue(dut_sharding_plan["forward"] == gold_fwd_plan)
 
     def test_set_plan_upper_level(self):
         class MLP(nn.Module):
@@ -495,9 +487,7 @@ class TestSetPlan(DTensorTestBase):
                 super().__init__()
                 self.mlp = MLP()
 
-        _, _, base_param_plan, base_fwd_plan = auto_parallelize_module(
-            SetUpperBaseline(), policy="MEGATRON", plan_only=True
-        )
+        _, _, base_sharding_plan = auto_parallelize_module(SetUpperBaseline(), policy="MEGATRON", plan_only=True)
 
         class SetUpperNoneNone(nn.Module):
             def __init__(self):
@@ -527,23 +517,21 @@ class TestSetPlan(DTensorTestBase):
                 set_plan_overriding_policy(self, {"mlp.fc1.weight": "FAKED"}, {"mlp.output": "FAKED"})
                 # --> both root becomes these
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(
-            SetUpperNoneNone(), policy="MEGATRON", plan_only=True
-        )
-        self.assertTrue(dut_param_plan == base_param_plan)
-        self.assertTrue(dut_fwd_plan == base_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetUpperNoneNone(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == base_sharding_plan["parameter"])
+        self.assertTrue(dut_sharding_plan["forward"] == base_sharding_plan["forward"])
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetUpperParam(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == {"mlp.fc1.weight": "FAKED"})
-        self.assertTrue(dut_fwd_plan == base_fwd_plan)
+        _, _, dut_sharding_plan = auto_parallelize_module(SetUpperParam(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == {"mlp.fc1.weight": "FAKED"})
+        self.assertTrue(dut_sharding_plan["forward"] == base_sharding_plan["forward"])
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetUpperFwd(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == base_param_plan)
-        self.assertTrue(dut_fwd_plan == {"mlp.output": "FAKED"})
+        _, _, dut_sharding_plan = auto_parallelize_module(SetUpperFwd(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == base_sharding_plan["parameter"])
+        self.assertTrue(dut_sharding_plan["forward"] == {"mlp.output": "FAKED"})
 
-        _, _, dut_param_plan, dut_fwd_plan = auto_parallelize_module(SetUpperBoth(), policy="MEGATRON", plan_only=True)
-        self.assertTrue(dut_param_plan == {"mlp.fc1.weight": "FAKED"})
-        self.assertTrue(dut_fwd_plan == {"mlp.output": "FAKED"})
+        _, _, dut_sharding_plan = auto_parallelize_module(SetUpperBoth(), policy="MEGATRON", plan_only=True)
+        self.assertTrue(dut_sharding_plan["parameter"] == {"mlp.fc1.weight": "FAKED"})
+        self.assertTrue(dut_sharding_plan["forward"] == {"mlp.output": "FAKED"})
 
 
 if __name__ == "__main__":

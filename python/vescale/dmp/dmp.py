@@ -236,6 +236,7 @@ def auto_parallelize_module(
         print()
 
     # parallelize as planned
+    sharding_plan = {"parameter": root_param_plan, "forward": root_fwd_plan}
     if plan_only:
-        return model, device_mesh, root_param_plan, root_fwd_plan
-    return parallelize_module(model, device_mesh, root_param_plan, root_fwd_plan)
+        return model, device_mesh, sharding_plan
+    return parallelize_module(model, device_mesh, sharding_plan)

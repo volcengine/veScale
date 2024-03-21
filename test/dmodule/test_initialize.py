@@ -188,7 +188,9 @@ class DModuleTestInit(DTensorTestBase):
         # parallelize dmodule
         with torch.device("cpu"):
             dmlp = DMLP(config)
-        parallelize_module(dmlp, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        sharding_plan = {"parameter": param_sharding_plan, "forward": fwd_resharding_plan}
+
+        parallelize_module(dmlp, device_mesh, sharding_plan)
         dmlp.reset_parameters()
         optim = torch.optim.SGD(dmlp.parameters(), lr=0.1)
 
@@ -208,7 +210,10 @@ class DModuleTestInit(DTensorTestBase):
         # parallelize dmodule
         with torch.device("cpu"):
             dmlp = DMLP(config, is_sharded=True, world_size=self.world_size)
-        parallelize_module(dmlp, device_mesh, param_sharding_plan, fwd_resharding_plan, is_model_sharded=True)
+
+        sharding_plan = {"parameter": param_sharding_plan, "forward": fwd_resharding_plan}
+
+        parallelize_module(dmlp, device_mesh, sharding_plan, is_model_sharded=True)
         dmlp.reset_parameters()
         optim = torch.optim.SGD(dmlp.parameters(), lr=0.1)
 
@@ -225,9 +230,11 @@ class DModuleTestInit(DTensorTestBase):
         mlp_golden.parallelize(device_mesh)
         optim_golden = torch.optim.SGD(mlp_golden.parameters(), lr=0.1)
 
+        sharding_plan = {"parameter": param_sharding_plan, "forward": fwd_resharding_plan}
+
         # parallelize dmodule
         dmlp = deferred_init(DMLP, config)
-        parallelize_module(dmlp, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmlp, device_mesh, sharding_plan)
         dmlp.reset_parameters()
         optim = torch.optim.SGD(dmlp.parameters(), lr=0.1)
 

@@ -74,7 +74,9 @@ class ObjReturnTest(DTensorTestBase):
         param_sharding_plan = {}
         fwd_resharding_plan = {".output": {"last_hidden_state": [Replicate()], "hidden_states": [Shard(0)]}}
 
-        dmodule = parallelize_module(TestModel(rt_type), device_mesh, param_sharding_plan, fwd_resharding_plan)
+        sharding_plan = {"parameter": param_sharding_plan, "forward": fwd_resharding_plan}
+
+        dmodule = parallelize_module(TestModel(rt_type), device_mesh, sharding_plan)
 
         input = torch.rand(4, 4, 4).cuda()
         d_input = distribute_tensor(input.detach(), device_mesh, [Shard(1)])
