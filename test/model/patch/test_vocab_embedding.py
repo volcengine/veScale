@@ -60,7 +60,7 @@ class VocabEmbeddingTest(DTensorTestBase):
         dmodel = VocabEmbedding()
         param_sharding_plan = {}
         fwd_resharding_plan = {".input": [[Replicate()]]}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         _ = dmodel(input_tensor)
         patched_forward.assert_not_called()
 
@@ -74,7 +74,7 @@ class VocabEmbeddingTest(DTensorTestBase):
         dmodel = VocabEmbedding()
         param_sharding_plan = {"emb.weight": [Shard(1)]}
         fwd_resharding_plan = {".input": [[Replicate()]]}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         _ = dmodel(input_tensor)
         patched_forward.assert_not_called()
 
@@ -94,7 +94,7 @@ class VocabEmbeddingTest(DTensorTestBase):
         dmodel = VocabEmbedding()
         param_sharding_plan = {"emb.weight": [Shard(0)]}
         fwd_resharding_plan = {".input": [[Replicate()]]}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         dt_out = dmodel(input_tensor)
         local_out = dt_out.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
         loss = local_out.mean()
@@ -115,7 +115,7 @@ class VocabEmbeddingTest(DTensorTestBase):
         dmodel = VocabEmbedding()
         param_sharding_plan = {"emb.weight": [Shard(0)]}
         fwd_resharding_plan = {"emb.input": [[Shard(0)]]}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         with self.assertRaises(NotImplementedError):
             _ = dmodel(input_tensor)
 
@@ -129,7 +129,7 @@ class VocabEmbeddingTest(DTensorTestBase):
         dmodel = VocabEmbedding()
         param_sharding_plan = {"emb.weight": [Shard(0)]}
         fwd_resharding_plan = {}
-        parallelize_module(dmodel, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmodel, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         with self.assertRaises(AssertionError):
             _ = dmodel(input_tensor)
 

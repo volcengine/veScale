@@ -16,6 +16,7 @@
 ################################################################################
 
 import warnings
+import logging
 import inspect
 from functools import partial
 from typing import Any, Dict, Optional, Sequence, Union
@@ -39,19 +40,30 @@ FwdPIs = Union[SeqFwdPIs, DictFwdPIs]
 WeightPIs = Dict[str, Optional[PI]]
 
 
+def _convert_by_pi(
+    x: Any, pi: Optional[PI], device_mesh: DeviceMesh, *, allow_defer=False, raise_err=False, ignore_none=True
+):
+    if pi is None or not pi.placements:
+        return x
+    if isinstance(x, DTensor):
+        if allow_defer and pi.defer_reshard:
+            DeferReshardMode._push_sharding(pi.placements)
+            return x
+        return x.redistribute(device_mesh, pi.placements, async_op=pi.async_op)
+    if isinstance(x, torch.Tensor):
+        return DTensor.from_local(x, device_mesh, pi.placements, run_check=pi.run_check, async_input=pi.async_op)
+    if not raise_err:
+        logging.info("binding a placement %s with a %s obj: %s. The placement is ignored.", pi.placements, type(x), x)
+        return x
+    if ignore_none and (x is None):
+        return x
+    raise RuntimeError(f"Trying to redistribute non-tensor values {type(x)}")
+
+
 class PreHookInput:
     @staticmethod
     def _convert(x: Any, pi: Optional[PI], device_mesh: DeviceMesh):
-        if pi is None or not pi.placements:
-            return x
-        if isinstance(x, DTensor):
-            return x.redistribute(device_mesh, pi.placements, async_op=pi.async_op)
-        if isinstance(x, torch.Tensor):
-            return DTensor.from_local(x, device_mesh, pi.placements, run_check=pi.run_check, async_input=pi.async_op)
-        warnings.warn(
-            f"It is not supported to bind a placement {pi.placements} with a {type(x)} obj: {x}. The placement is ignored."
-        )
-        return x
+        return _convert_by_pi(x, pi, device_mesh, raise_err=False)
 
     @staticmethod
     def _hook(module: nn.Module, args: Any, kwargs: Any, device_mesh: DeviceMesh, input_pis: FwdPIs):
@@ -163,20 +175,8 @@ class PostHookWeight:
 
 class PostHookOutput:
     @staticmethod
-    def _convert(x: Any, pi: Optional[PI], device_mesh: DeviceMesh):  # TODO: unify _convert with above
-        if pi is None or not pi.placements:
-            return x
-        if isinstance(x, DTensor):
-            if pi.defer_reshard:
-                DeferReshardMode._push_sharding(pi.placements)
-                return x
-            else:
-                return x.redistribute(device_mesh, pi.placements, async_op=pi.async_op)
-        if isinstance(x, torch.Tensor):
-            return DTensor.from_local(x, device_mesh, pi.placements, run_check=pi.run_check, async_input=pi.async_op)
-        if x is None:
-            return x
-        raise RuntimeError(f"Trying to redistribute non-tensor values {type(x)}")
+    def _convert(x: Any, pi: Optional[PI], device_mesh: DeviceMesh):
+        return _convert_by_pi(x, pi, device_mesh, allow_defer=True, raise_err=True, ignore_none=True)
 
     @staticmethod
     def _convert_dictlike(output_dict: Dict[str, Any], pi_dict: DictFwdPIs, device_mesh: DeviceMesh):

@@ -84,7 +84,7 @@ class TestDeferResharding(DTensorTestBase):
             "m2.fc2.weight": [Shard(1)],
         }
 
-        ptb_mlp = parallelize_module(ptb_mlp, mesh, param_sharding_plan, fwd_sharding_plan)
+        ptb_mlp = parallelize_module(ptb_mlp, mesh, {"parameter": param_sharding_plan, "forward": fwd_sharding_plan})
 
         out = ptb_mlp(dtensor)
 
@@ -107,7 +107,7 @@ class TestDeferResharding(DTensorTestBase):
             "partial_bias": [Partial()],
         }
 
-        ptb_mlp = parallelize_module(ptb_mlp, mesh, param_sharding_plan, fwd_sharding_plan)
+        ptb_mlp = parallelize_module(ptb_mlp, mesh, {"parameter": param_sharding_plan, "forward": fwd_sharding_plan})
 
         out = ptb_mlp(dtensor)
 

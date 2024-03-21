@@ -11,13 +11,16 @@ if [ ! -f "$PATCH_PATH" ]; then
     exit 1
 fi
 
-git clone https://github.com/pytorch/torchdistx.git
+git clone --depth 1 https://github.com/pytorch/torchdistx.git
 pushd torchdistx
 git pull
 git checkout 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a
 git apply $PATCH_PATH
 git submodule sync
-git submodule update --init --recursive
+git submodule update --init --recursive --depth 1
 cmake -DTORCHDIST_INSTALL_STANDALONE=ON  -GNinja -DCAKE_CXX_COMPILER_LAUNCHER=ccache -B build
 cmake --build build
-pip3 install -e .
+pip3 install .
+
+popd
+rm -rf torchdistx

@@ -17,6 +17,7 @@
 
 import collections
 import re
+import difflib
 import warnings
 from types import MethodType
 from typing import Any, List, Deque, Dict, Mapping, Optional, Sequence, Set, Tuple, Union
@@ -42,6 +43,27 @@ _ORGIN_LOAD_STATE_DICT = "_origin_load_state_dict"
 class DModule:
     def __init__(self) -> None:
         raise RuntimeError("`DModule` inheritance is deprecated. Use `parallelize_module` instead.")
+
+    @staticmethod
+    def check_and_sanitize_sharding_plan(sharding_plan: Optional[Dict[str, Dict[str, Any]]]):
+        if sharding_plan is None:
+            sharding_plan = {}
+        if "parameter" not in sharding_plan:
+            sharding_plan["parameter"] = {}
+        if "forward" not in sharding_plan:
+            sharding_plan["forward"] = {}
+        accepted_keys = ("parameter", "forward")
+        for key in sharding_plan.keys():
+            if key in accepted_keys:
+                continue
+            possible_key = difflib.get_close_matches(key, accepted_keys, n=1)
+            if len(possible_key) > 0:
+                raise KeyError(
+                    f"parallelize_module does not support `{key}`as key, probably you mean {possible_key[0]}?"
+                )
+            else:
+                raise KeyError(f"parallelize_module does not support `{key}`as key.")
+        return sharding_plan
 
     @staticmethod
     def is_dmodule(module: nn.Module) -> bool:

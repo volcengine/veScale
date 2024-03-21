@@ -18,8 +18,8 @@ We are refactoring our [internal LLM training system](https://arxiv.org/abs/2402
 bash patches/build_pytorch_w_patch.sh
 ```
 
-This will compile and install a patched version of PyTorch (based on v2.2.0_rc8).
-The patch code can be found here: [PyTorch-Patch](patches/patched_pytorch_v2.2.0_rc8.patch)
+This will compile and install a patched version of PyTorch (based on v2.2.1_rc3).
+The patch code can be found here: [PyTorch-Patch](patches/patched_pytorch_v2.2.1_rc3.patch)
 
 #### Install a Patched Version of TorchDistX
 

@@ -22,6 +22,25 @@ from vescale.dtensor.sharding_prop import ShardingPropagator
 __all__ = ["DTensor"]
 aten = torch.ops.aten
 
+_OK_TO_USE_DATA_PTR = True
+
+
+def _dispatch_torch_make_wrapper_subclass(*args, data_ptr, **kwargs):
+    global _OK_TO_USE_DATA_PTR
+
+    if _OK_TO_USE_DATA_PTR:
+        try:
+            return torch.Tensor._make_wrapper_subclass(*args, data_ptr=data_ptr, **kwargs)
+        except TypeError:
+            warnings.warn(
+                "The current torch version does not have the _make_wrapper_subclass "
+                "that is compatible with the usage of local data_ptr."
+                "This may disable supports for plug-in ops(a.k.a. non native torch ops) on VeScale Dtenors."
+                "To re-enable plug-in ops, try to install the modified PyTorch."
+            )
+            _OK_TO_USE_DATA_PTR = False
+    return torch.Tensor._make_wrapper_subclass(*args, **kwargs)
+
 
 class DTensor(torch.Tensor):
     _local_tensor: torch.Tensor
@@ -62,31 +81,16 @@ class DTensor(torch.Tensor):
 
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
-        try:
-            r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                cls,
-                shape,
-                strides=stride,
-                dtype=dtype,
-                device=local_tensor.device,
-                layout=local_tensor.layout,
-                requires_grad=requires_grad,
-                data_ptr=local_tensor.data_ptr(),
-            )
-        except TypeError:
-            warnings.warn(
-                "Torch version is not byted-torch. "
-                "This may disable supports for plug-in ops(a.k.a. non native torch ops) on Vescale Dtenors"
-            )
-            r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                cls,
-                shape,
-                strides=stride,
-                dtype=dtype,
-                device=local_tensor.device,
-                layout=local_tensor.layout,
-                requires_grad=requires_grad,
-            )
+        r = _dispatch_torch_make_wrapper_subclass(
+            cls,
+            shape,
+            strides=stride,
+            dtype=dtype,
+            device=local_tensor.device,
+            layout=local_tensor.layout,
+            requires_grad=requires_grad,
+            data_ptr=local_tensor.data_ptr(),
+        )
 
         tensor_meta = TensorMeta(shape, stride, dtype)
         # deepcopy and set spec

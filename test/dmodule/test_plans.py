@@ -103,7 +103,7 @@ class DModuleTestPlans(DTensorTestBase):
         dmlp = DMLP(config)
         dmlp.to(devce_type)
         dmlp.load_state_dict(mlp_golden.state_dict())
-        parallelize_module(dmlp, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmlp, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
 
         # create data (local replicate)
         input_golden = torch.randn(
@@ -141,6 +141,16 @@ class DModuleTestPlans(DTensorTestBase):
         torch.cuda.manual_seed(42)
         self._run_plan(param_sharding_plan1, fwd_resharding_plan1, "cuda")
         self._run_plan(param_sharding_plan2, fwd_resharding_plan2, "cuda")
+
+    @with_comms_device(device_type="cuda")
+    def test_wrong_plan(self):
+        device_mesh = DeviceMesh("cuda", list(range(self.world_size)))
+        # create dmodule (by plans)
+        dmlp = DMLP(config)
+        with self.assertRaises(KeyError):
+            parallelize_module(dmlp, device_mesh, {"parameters": param_sharding_plan1, "forward": fwd_resharding_plan1})
+        with self.assertRaises(KeyError):
+            parallelize_module(dmlp, device_mesh, {"parameter": param_sharding_plan1, "forwards": fwd_resharding_plan1})
 
 
 if __name__ == "__main__":

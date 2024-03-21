@@ -273,7 +273,7 @@ class TestDeferInitDModule(DTensorTestBase):
             "fc2.weight": [Shard(1)],
             "buffer": [Replicate()],
         }
-        mlp = parallelize_module(mlp, mesh, param_sharding_plan, fwd_sharding_plan)
+        mlp = parallelize_module(mlp, mesh, {"parameter": param_sharding_plan, "forward": fwd_sharding_plan})
         out = mlp(tensor)
         self.assertTrue(isinstance(out, DTensor))
         self.assertTrue(out.placements[0].is_replicate())

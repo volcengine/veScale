@@ -80,7 +80,7 @@ class DModuleTestSL(DTensorTestBase):
     def _run_save(self, device_type: str):
         device_mesh = DeviceMesh(device_type, list(range(self.world_size)))
         dmlp = deferred_init(DMLP, config)
-        parallelize_module(dmlp, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmlp, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         dmlp.reset_parameters()
         torch.save(dmlp.state_dict(), _new_file(device_type, self.rank))
 
@@ -88,12 +88,12 @@ class DModuleTestSL(DTensorTestBase):
         # load model
         device_mesh = DeviceMesh(model_device_type, list(range(self.world_size)))
         dmlp = deferred_init(DMLP, config)
-        parallelize_module(dmlp, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmlp, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         dmlp.load_state_dict(torch.load(_get_file(saved_device_type, self.rank)))
 
         # prepare golden
         dmlp_golden = deferred_init(DMLP, config)
-        parallelize_module(dmlp_golden, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        parallelize_module(dmlp_golden, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
         dmlp_golden.reset_parameters()
 
         # match state dict
