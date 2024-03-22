@@ -32,7 +32,7 @@ from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 
 from parallel.ddp_optim.test_ddp import get_unfied_param_and_data
-from test.test_models.mlp import MLP, HIDDEN_DIM, BSZ, MLP_PAIRWISE_PARAM_SHARDING_PLAN, MLP_FWD_RESAHRDING_PLAM
+from test_models.mlp import MLP, HIDDEN_DIM, BSZ, MLP_PAIRWISE_PARAM_SHARDING_PLAN, MLP_FWD_RESAHRDING_PLAM
 
 
 class VeScaleClipGradsTest(DTensorTestBase):
