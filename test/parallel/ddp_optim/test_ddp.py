@@ -30,7 +30,7 @@ from vescale.dtensor.device_mesh import init_device_mesh
 from vescale.dtensor.api import redistribute_dtensor
 from vescale.dmodule.api import parallelize_module
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
-from vescale.optim.base_optimizer import BasicOptimizer, BaseOptimizerHook
+from vescale.optim.base_optimizer import BasicOptimizer, BasicOptimizerHook
 
 from common_dtensor import DTensorTestBase, with_comms
 from test_models.mlp import (
@@ -180,7 +180,7 @@ class VeScaleDDPTest(DTensorTestBase):
         )
 
         ve_optimizer = torch.optim.Adam(ve_model.parameters(), lr=0.01)
-        ve_optimizer = BasicOptimizer(ve_optimizer, models=ve_model, grad_hook=BaseOptimizerHook)
+        ve_optimizer = BasicOptimizer(ve_optimizer, models=ve_model, grad_hook=BasicOptimizerHook)
 
         # epoch 1
         ve_optimizer.zero_grad()
