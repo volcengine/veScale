@@ -27,6 +27,49 @@ from vescale.dtensor.dtensor import DTensor
 logger = logging.getLogger(__name__)
 
 
+class GradOptimizerHookBase(ABC):
+    """
+    Abstract base class for hooks, that needed to be run before
+    and after `optim.step`.
+    """
+
+    @abstractstaticmethod
+    def step_pre_hook(optim, *args, **kwargs):
+        return NotImplementedError("not impl")
+
+    @abstractstaticmethod
+    def step_post_hook(optim, *args, **kwargs):
+        raise NotImplementedError("not impl")
+
+
+class BasicOptimizerHook(GradOptimizerHookBase):
+    """
+    A GradOptimizerHookBase subclass, that is responsible to 'fill' flattened
+    main_grad in DDP to PyTorch '.grad' fields.
+
+    Example: see example codes for `BasicOptimizer`
+    """
+
+    def step_pre_hook(optim, *args, **kwargs):
+        for param_group in optim.param_groups:
+            for p in param_group["params"]:
+                if p.grad is not None:
+                    continue
+                if p.main_grad is None:
+                    continue
+                if isinstance(p.data, DTensor):
+                    dtensor_placements = p.data.placements
+                    dtensor_device_mesh = p.data.device_mesh
+                    p.grad = DTensor.from_local(
+                        p.main_grad, device_mesh=dtensor_device_mesh, placements=dtensor_placements
+                    )
+                else:
+                    p.grad = p.main_grad
+
+    def step_post_hook(optim, *args, **kwargs):
+        return None
+
+
 class OptimizerBase(ABC):
     """
     Abstract base class for vescale optimizer wrapper.
@@ -70,21 +113,6 @@ class OptimizerBase(ABC):
         return 1.0
 
 
-class GradOptimizerHookBase(ABC):
-    """
-    Abstract base class for hooks, that needed to be run before
-    and after `optim.step`.
-    """
-
-    @abstractstaticmethod
-    def step_pre_hook(optim, *args, **kwargs):
-        return NotImplementedError("not impl")
-
-    @abstractstaticmethod
-    def step_post_hook(optim, *args, **kwargs):
-        raise NotImplementedError("not impl")
-
-
 class BasicOptimizer(OptimizerBase):
     """
     A simple wrapper around a concrete optimizer instance. It provides basic
@@ -108,14 +136,14 @@ class BasicOptimizer(OptimizerBase):
         # One only need to wrap a Adam optimizer by BasicOptimizer, then everything,
         # like flattened main_grad in DDP world will be hidden.
 
-        from vescale.optim.base_optimizer import BasicOptimizer, BaseOptimizerHook
+        from vescale.optim.base_optimizer import BasicOptimizer, BasicOptimizerHook
         from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
         from vescale.dmodule.api import parallelize_module
 
         mlp = parallelize_module(MLP(), mesh, ..., ...)
         ddp_model = DDP(mlp, ...)
         optim = torch.optim.Adam(model.parameters())
-        optim_wrapper = BasicOptimizer(optim, mlp, grad_hook=BaseOptimizerHook())
+        optim_wrapper = BasicOptimizer(optim, mlp)
 
         # do the forward and backward
         ddp_model(torch.rand(xxx)).sum().backward()
@@ -128,12 +156,17 @@ class BasicOptimizer(OptimizerBase):
         self,
         optimizer,
         models: Union[torch.nn.Module, List[torch.nn.Module]],
-        grad_hook: Optional[GradOptimizerHookBase] = None,
+        grad_hook: Optional[GradOptimizerHookBase] = BasicOptimizerHook(),
     ) -> None:
         super().__init__(optimizer=optimizer)
         self.models = models
         if not isinstance(self.models, List):
             self.models = [self.models]
+
+        if any(getattr(x, "use_distributed_optimizer", False) for x in self.models):
+            raise RuntimeError(
+                "detected DDP with use_distributed_optimizer on, please consider use a distributed optimizer"
+            )
 
         if grad_hook is not None:
             self.register_optimizer_hook(grad_hook)
@@ -166,31 +199,3 @@ class BasicOptimizer(OptimizerBase):
     def register_optimizer_hook(self, grad_hook: GradOptimizerHookBase):
         self.optimizer.register_step_pre_hook(grad_hook.step_pre_hook)
         self.optimizer.register_step_post_hook(grad_hook.step_post_hook)
-
-
-class BaseOptimizerHook(GradOptimizerHookBase):
-    """
-    A GradOptimizerHookBase subclass, that is responsible to 'fill' flattened
-    main_grad in DDP to PyTorch '.grad' fields.
-
-    Example: see example codes for `BasicOptimizer`
-    """
-
-    def step_pre_hook(optim, *args, **kwargs):
-        for param_group in optim.param_groups:
-            for p in param_group["params"]:
-                if p.grad is not None:
-                    continue
-                if p.main_grad is None:
-                    continue
-                if isinstance(p.data, DTensor):
-                    dtensor_placements = p.data.placements
-                    dtensor_device_mesh = p.data.device_mesh
-                    p.grad = DTensor.from_local(
-                        p.main_grad, device_mesh=dtensor_device_mesh, placements=dtensor_placements
-                    )
-                else:
-                    p.grad = p.main_grad
-
-    def step_post_hook(optim, *args, **kwargs):
-        return None

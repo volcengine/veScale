@@ -59,6 +59,5 @@ def param_is_sharded_or_replicate_on_first_rank(param):
     return False
 
 
-# TODO:
 def param_is_shared(param):
-    return False
+    return getattr(param, "shared", False)

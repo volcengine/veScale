@@ -130,6 +130,10 @@ class DistributedOptimizer(OptimizerBase):
                 self.data_parallel_group = m.data_parallel_group
             elif self.data_parallel_group != m.data_parallel_group:
                 raise RuntimeError("Detect model chunks of warious data-parallel process groups")
+        if not all(x.use_distributed_optimizer for x in models):
+            print(
+                "You are using a distributed optimizer, it's suggested to set use_distributed_optimizer on for better performance"
+            )
 
         param_dtype_cnt = {}
         main_param_dtype_cnt = 0
@@ -545,10 +549,9 @@ class DistributedOptimizer(OptimizerBase):
                     shard_main_param = shard_model_param.clone().float()
                     # copy sharded info from DTensor
                     shard_model_param._spec = None if not isinstance(model_param, DTensor) else model_param._spec
-                    # TODO: we need to find another way to judge whether a param is shared
-                    # if hasattr(model_param, "shared"):
-                    #     shard_model_param.shared = model_param.shared
-                    #     shard_main_param.shared = model_param.shared
+                    if hasattr(model_param, "shared"):
+                        shard_model_param.shared = model_param.shared
+                        shard_main_param.shared = model_param.shared
 
                     # Add to group.
                     model_float16_params_this_group.append(model_param)
@@ -563,9 +566,8 @@ class DistributedOptimizer(OptimizerBase):
                     shard_model_param = model_param_tensor.view(-1)[param_range.start : param_range.end]
                     model_fp32_params_this_group.append(model_param)
                     shard_fp32_params_this_group.append(shard_model_param)
-                    # TODO: we need to find another way to judge whether a param is shared
-                    # if hasattr(model_param, "shared"):
-                    #     shard_model_param.shared = model_param.shared
+                    if hasattr(model_param, "shared"):
+                        shard_model_param.shared = model_param.shared
 
                     # copy sharded info from DTensor
                     shard_model_param._spec = None if not isinstance(model_param, DTensor) else model_param._spec

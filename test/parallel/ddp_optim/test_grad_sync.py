@@ -26,7 +26,7 @@ from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.placement_types import Replicate, Shard
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
-from vescale.optim.base_optimizer import BasicOptimizer, BaseOptimizerHook
+from vescale.optim.base_optimizer import BasicOptimizer, BasicOptimizerHook
 
 HIDDEN_DIM = 16
 BSZ = 2
@@ -103,7 +103,7 @@ class LNGradSyncTest(DTensorTestBase):
             grad_sync=grad_sync,
         )
         optimizer = torch.optim.Adam(m.parameters(), lr=1e-3)
-        optimizer = BasicOptimizer(optimizer, models=m, grad_hook=BaseOptimizerHook)
+        optimizer = BasicOptimizer(optimizer, models=m, grad_hook=BasicOptimizerHook)
 
         dx = distribute_tensor(torch.rand(BSZ, SEQ_LEN, HIDDEN_DIM), device_mesh, inout_sharding)
         dout = m(dx)
@@ -211,7 +211,7 @@ class LNGradSyncTest(DTensorTestBase):
                 models=[ddp_m],
             )
         else:
-            optimizer = BasicOptimizer(optimizer, models=ddp_m, grad_hook=BaseOptimizerHook)
+            optimizer = BasicOptimizer(optimizer, models=ddp_m, grad_hook=BasicOptimizerHook)
         optimizer.zero_grad()
         if torch.distributed.get_rank() in (0, 1):
             dx = distribute_tensor(batch_1, tp_submesh, inout_sharding)

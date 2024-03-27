@@ -34,6 +34,9 @@ from vescale.dtensor.placement_types import Placement, Partial, Replicate, Shard
 from vescale.dtensor import zeros, ones, empty, full, randn
 from vescale.dtensor._utils import equal, allclose
 from vescale.dmp import auto_parallelize_module, set_plan_overriding_policy, get_plan_overriding_policy
+from vescale.ddp.distributed_data_parallel import DistributedDataParallel
+from vescale.optim.distributed_optimizer import DistributedOptimizer
+from vescale.optim.base_optimizer import BasicOptimizer, BasicOptimizerHook
 from vescale.initialize.deferred_init import deferred_init, is_deferred, materialize_dtensor, materialize_dparameter
 
 # All public APIs from vescale package
@@ -69,6 +72,10 @@ __all__ = [
     "materialize_dtensor",
     "materialize_dparameter",
     "deprecated_function",
+    "DistributedDataParallel",
+    "DistributedOptimizer",
+    "BasicOptimizer",
+    "BasicOptimizerHook",
 ]
 
 
