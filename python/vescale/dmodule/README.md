@@ -64,15 +64,17 @@
     # parallelize model into DModule with "maunal plans"
     dmlp = parallelize_module(mlp, 
                             DeviceMesh("cuda", [0, 1, 2, 3]), 
-                            param_sharding_plan={
-                                "fc1.weight": [Shard(0)],
-                                "fc1.bias": [Shard(0)],
-                                "fc2.weight": [Shard(1)],
-                                "fc2.bias": [Replicate()],
-                            }, 
-                            fwd_resharding_plan={
-                                "fc1.input": [[Replicate()]], # change to Shard(<dim>) for SP/DP
-                                "fc2.output": [[Replicate()]],
+                            {
+                                "parameter" : {
+                                    "fc1.weight": [Shard(0)],
+                                    "fc1.bias": [Shard(0)],
+                                    "fc2.weight": [Shard(1)],
+                                    "fc2.bias": [Replicate()],
+                                },
+                                "forward" : {
+                                    "fc1.input": [[Replicate()]], # change to Shard(<dim>) for SP/DP
+                                    "fc2.output": [[Replicate()]],
+                                }
                             })
     # forward in TP
     output = dmlp(input)

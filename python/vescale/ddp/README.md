@@ -39,7 +39,7 @@ dp_tp_mlp = DDP(
     # feed the paralellized module
     module=tp_mlp,
     # feed DP's sub-mesh or just `device_mesh` (i.e., by default we treat the first dim of devicemesh as data-parallelism).
-    data_pg_or_device_mesh=device_mesh["DP"],
+    data_pg_or_device_mesh=device_mesh["DP"], 
     # choose whether overlap gradient all-reduce with backwarding procedure for speeding up
     overlap_grad_reduce=True or False,
     # choose whether used `DistributedOptimizer`

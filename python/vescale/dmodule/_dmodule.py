@@ -115,6 +115,21 @@ class DModule:
         )
 
     @staticmethod
+    def _normalize_one_placements(placements: Union[None, Sequence[Placement], PI], mesh_ndim: int) -> Optional[PI]:
+        if not isinstance(placements, (type(None), Sequence, PI)):
+            raise ValueError(
+                f"<placements> must either be `None, Sequence[Placement], PlacementsInterface,  but found: {placements}!"
+            )
+        if isinstance(placements, Sequence) and not all(isinstance(p, Placement) for p in placements):
+            raise ValueError(f"<placements> must be `Sequence[Placement]`, but found: {placements}!")
+        # wrap as PI
+        pi = PI.from_placements(placements)
+        if pi.is_none():  # None for None
+            return None
+        pi.normalize_placements(mesh_ndim)
+        return pi  # valid PI
+
+    @staticmethod
     def register_sharding_plan(
         module: nn.Module,
         device_mesh: DeviceMesh,
@@ -135,21 +150,7 @@ class DModule:
             raise RuntimeError("Trying to register sharding plan with different device mesh")
         module._device_mesh = device_mesh
 
-        def _normalize_one_placements(
-            placements: Union[None, Sequence[Placement], PI],
-        ) -> Optional[PI]:
-            if not isinstance(placements, (type(None), Sequence, PI)):
-                raise ValueError(
-                    f"<placements> must either be `None, Sequence[Placement], PlacementsInterface,  but found: {placements}!"
-                )
-            if isinstance(placements, Sequence) and not all(isinstance(p, Placement) for p in placements):
-                raise ValueError(f"<placements> must be `Sequence[Placement]`, but found: {placements}!")
-            # wrap as PI
-            pi = PI.from_placements(placements)
-            if pi.is_none():  # None for None
-                return None
-            pi.normalize_placements(device_mesh.ndim)
-            return pi  # valid PI
+        _norm_one_placements = lambda p: DModule._normalize_one_placements(p, device_mesh.ndim)
 
         if param_sharding_plan:
             for param_path, placements in param_sharding_plan.items():
@@ -160,10 +161,10 @@ class DModule:
                     if submod_fqn not in module._param_sharding_plan:
                         module._param_sharding_plan[submod_fqn] = {}
                     if param_name not in module._param_sharding_plan[submod_fqn]:
-                        module._param_sharding_plan[submod_fqn][param_name] = _normalize_one_placements(placements)
+                        module._param_sharding_plan[submod_fqn][param_name] = _norm_one_placements(placements)
                     else:
                         warnings.warn(f"Duplicated param sharding plan for {submod_fqn}.{param_name}!")
-                        module._param_sharding_plan[submod_fqn][param_name] = _normalize_one_placements(placements)
+                        module._param_sharding_plan[submod_fqn][param_name] = _norm_one_placements(placements)
 
         if fwd_resharding_plan:
             for tensor_path, placements in fwd_resharding_plan.items():
@@ -187,7 +188,7 @@ class DModule:
                                 "Currently, no support for mix `args and kwargs placement` in fwd plan!"
                             )
                         if isinstance(placements, Sequence):
-                            pis = [_normalize_one_placements(p) for p in placements]
+                            pis = [_norm_one_placements(p) for p in placements]
                         elif isinstance(placements, Dict):
                             pis = {}
                             for k, v in placements.items():
@@ -195,15 +196,15 @@ class DModule:
                                     assert isinstance(
                                         v, Sequence
                                     ), "the placements for variable position arguments have to be list"
-                                    pis[k] = [_normalize_one_placements(p) for p in v]
+                                    pis[k] = [_norm_one_placements(p) for p in v]
                                 else:
-                                    pis[k] = _normalize_one_placements(v)
+                                    pis[k] = _norm_one_placements(v)
                         # register plan
                         module._fwd_resharding_plan[submod_fqn][tensor_category] = pis
                     else:  # weight/bias
                         tensor_category = "weight"
-                        module._fwd_resharding_plan[submod_fqn][tensor_category][tensor_name] = (
-                            _normalize_one_placements(placements)
+                        module._fwd_resharding_plan[submod_fqn][tensor_category][tensor_name] = _norm_one_placements(
+                            placements
                         )
 
     @staticmethod
@@ -336,13 +337,60 @@ class DModule:
 
     @staticmethod
     def post_patch_submodules(module: nn.Module) -> None:
-        r"""Post patching specific submodules with implementation under `vescale.model.patch`.
+        """Post patching specific submodules with implementation under `vescale.model.patch`.
         (DModule is generic module class and should NOT contain specific layers or ops.).
         """
         import vescale.model.patch as model_patch
 
         for specific_model_patch in model_patch.get_all_model_patch():
             specific_model_patch(module)
+
+    @staticmethod
+    def prepare_factory(module: nn.Module, factory: Union[bool, Dict[nn.Module, Union[bool, Dict]]]) -> None:
+        """
+        Prepare to dtensorize factory in forward runtime for appointed submodules and factories.
+        NOTE: this should be called after `post_patch_submodules` or any functions that changes `submodule.forward()`
+        """
+        assert DModule.has_all_attributes(module)
+
+        if not factory:  # False or {}
+            return
+
+        if factory is True:
+            factory = {type(module): True}
+
+        # collect appointed submodules
+        fqn_submods = [(fqn, submod) for fqn, submod in module.named_modules() if type(submod) in factory]
+        if not fqn_submods:
+            return
+
+        # verifiy that there is no nested submodule for factory dispatch mode
+        fqns = [fqn for fqn, _ in fqn_submods]
+        for fqn in fqns:
+            for other_fqn in fqns:
+                if fqn == other_fqn:
+                    continue
+                if other_fqn.startswith(fqn):
+                    raise NotImplementedError(
+                        f"Nested submodules for dtensorizing factory is not supported yet: `{fqn}` and `{other_fqn}`!"
+                    )
+
+        # normalize appointed factory, wrap the forward with factory dispatch mode
+        from vescale.dmodule._factory import wrap_factory_mode
+
+        for fqn, submod in fqn_submods:
+            factory_placement: Union[bool, Dict] = factory[type(submod)]
+            if not factory_placement:  # False or {}
+                continue
+            if factory_placement is True:
+                factory_pi = {}  # all factories as default placement
+            else:  # Dict
+                factory_pi = {
+                    f: DModule._normalize_one_placements(p, module._device_mesh.ndim)
+                    for f, p in factory_placement.items()
+                }
+                factory_pi = {f: p for f, p in factory_pi.items() if p is not None}
+            wrap_factory_mode(submod, module._device_mesh, factory_pi)
 
     @staticmethod
     def prepare_grad_sync(module: nn.Module, grad_sync: Union[bool, Dict]) -> None:
@@ -360,7 +408,7 @@ class DModule:
                 return True
 
             for clss, pnames in grad_sync.items():
-                if not isinstance(mod, clss):
+                if type(mod) is not clss:
                     continue
                 if not pnames:  # False or []
                     continue

@@ -35,102 +35,123 @@ def parallelize_module(
     sharding_plan: Optional[Dict[str, Dict[str, Any]]] = None,
     *,
     is_model_sharded: bool = False,
+    factory: Union[bool, Dict[nn.Module, Union[bool, Dict]]] = False,
     grad_sync: Union[bool, Dict] = True,
 ) -> nn.Module:
     r"""
     Parallelize this `nn.Module` instance by inplace converting its parameters/buffers/activations from Tensor to DTensor:
         1. onto target `device_mesh`
-        2. with target `param_sharding_plan` and `fwd_resharding_plan`
+        2. with target `sharding_plan`
 
     Args:
         device_mesh: the device mesh used in this entire DModule and its submodules
 
         sharding_plan:
             'parameter': the plan to specify which and how weights are sharded on device mesh during initalization.
-                                Format: `{ <fully qualified name of weight/bias> : <sharding placements> }`
-                                where
-                                - <fully qualified name> is torch-native (see https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.get_parameter)
-                                - <fully qualified name> uses regex match in form of `<regex pattern for submodule>.<weight/bias>`
-                                - <sharding placements> can be either:
-                                    - `None` for no op
-                                    - `Sequence[Placement]` for sharding spec (see `Placement` in `python/vescale/dtensor/README.md`)
-                                    - `PlacementsInterface(Sequence[Placement], <optional flags>)` for sharding spec with DTensor flags
 
-                                Note: Non-specified parameters in module will be converted to DTensor in `Replicate`, i.e., the "default" param plan.
+                        Format: `{ <fully qualified name of weight/bias> : <sharding placements> }`
+                            - <fully qualified name> is torch-native (see https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.get_parameter)
+                            - <fully qualified name> uses regex match in form of `<regex pattern for submodule>.<weight/bias>`
+                            - <sharding placements> can be either:
+                                - `None` for no op
+                                - `Sequence[Placement]` for sharding spec (see `Placement` in `python/vescale/dtensor/README.md`)
+                                - `PlacementsInterface(Sequence[Placement], <optional flags>)` for sharding spec with DTensor flags
 
-                                Example:
-                                >>> # find submodule "fc1"'s "weight" and convert it to DTensor in `tensor.dim=1` sharded on `device_mesh.dim=0`
-                                >>> # and convert the rest parameters to DTensor in `Replicate()`
-                                >>> param_plan = { "fc1.weight" : [Shard(1)] }
+                        Note: Non-specified parameters in module will be converted to DTensor in `Replicate`, i.e., the "default" param plan.
+
+                        Example:
+                        >>> # find submodule "fc1"'s "weight" and convert it to DTensor in `tensor.dim=1` sharded on `device_mesh.dim=0`
+                        >>> # and convert the rest parameters to DTensor in `Replicate()`
+                        >>> param_plan = { "fc1.weight" : [Shard(1)] }
 
             'forward': the plan to specify which and how submodules' input/weight/output are resharded on device mesh during forward pass.
-                                Format: `{ <fully qualified name of input/weight/output> : <resharding placements> }`
-                                where
-                                - <fully qualified name> is same as above
-                                - <fully qualified name of input/weight/output> uses regex match in form of `<regex pattern for submodule>.<input/weight/output>`
-                                - <resharding placements> can be defined in two forms:
 
-                                    1. List form: Just list all desired <sharding placements> (same as above), in a list.
+                        Format: `{ <fully qualified name of input/weight/output> : <resharding placements> }`
+                            - <fully qualified name> is same as above
+                            - <fully qualified name of input/weight/output> uses regex match in form of `<regex pattern for submodule>.<input/weight/output>`
+                            - <resharding placements> can be defined in two forms:
 
-                                        The order of placement should follow the order the the arguments are defined.
-                                        And, for `*args`, the placements should be defined in the order of input.
+                            1. List form: Just list all desired <sharding placements> (same as above), in a list.
 
-                                        Example:
-                                        >>> def foo(a, b, *args, c=1.0, **kwargs): pass
-                                        >>> fwd_plan = {
-                                                "input":[
-                                                    [Replicate()], # placement for a
-                                                    [Shard(0)],  # placement for b
-                                                    [Shard(1)],  # placement for args[0]
-                                                    None,        # no op for args[1]
-                                                    None,       # no op for c
-                                                    [Partial]  # placement for the first key in kwargs.
-                                                ]
-                                            }
-                                        >>> foo(
-                                                tensor0,  # will be Replicate
-                                                tensor1,  # will be Shard(0)
-                                                tensor2,  # will be Shard(1)
-                                                tensor3,  # will be torch.Tenosr
-                                                d = tensor4 # will be Partial
-                                            )
+                                The order of placement should follow the order the the arguments are defined.
+                                And, for `*args`, the placements should be defined in the order of input.
+
+                                Example:
+                                >>> def foo(a, b, *args, c=1.0, **kwargs): pass
+                                >>> fwd_plan = {
+                                        "input":[
+                                            [Replicate()], # placement for a
+                                            [Shard(0)],  # placement for b
+                                            [Shard(1)],  # placement for args[0]
+                                            None,        # no op for args[1]
+                                            None,       # no op for c
+                                            [Partial]  # placement for the first key in kwargs.
+                                        ]
+                                    }
+                                >>> foo(
+                                        tensor0,  # will be Replicate
+                                        tensor1,  # will be Shard(0)
+                                        tensor2,  # will be Shard(1)
+                                        tensor3,  # will be torch.Tenosr
+                                        d = tensor4 # will be Partial
+                                    )
 
 
-                                    2. Dictionary form: Use the arg name as the key, and the <sharding placements> as the value.
-                                        There is a special case where the key is `*args` and then the value is a list of placements.
+                            2. Dictionary form: Use the arg name as the key, and the <sharding placements> as the value.
+                                There is a special case where the key is `*args` and then the value is a list of placements.
 
-                                        Example:
-                                        >>> def foo(a, b, *args, c=1.0, **kwargs): pass
-                                        >>> fwd_plan={
-                                                "input":{
-                                                    "a": [Replicate()], # placement for a
-                                                    "b": [Shard(0)],  # placement for b
-                                                    "args":[[Shard(1)], None],  # list of placements for args
-                                                    "c": None,       # placement for c
-                                                    "d": [Partial]  # placement for the first key in kwargs (called as d)
-                                                }
-                                            }
-                                        >>> foo(
-                                                tensor0,  # will be Replicate
-                                                tensor1,  # will be Shard(0)
-                                                tensor2,  # will be Shard(1)
-                                                tensor3,  # will be torch.Tenosr
-                                                d = tensor4 # will be Partial
-                                            )
+                                Example:
+                                >>> def foo(a, b, *args, c=1.0, **kwargs): pass
+                                >>> fwd_plan={
+                                        "input":{
+                                            "a": [Replicate()], # placement for a
+                                            "b": [Shard(0)],  # placement for b
+                                            "args":[[Shard(1)], None],  # list of placements for args
+                                            "c": None,       # placement for c
+                                            "d": [Partial]  # placement for the first key in kwargs (called as d)
+                                        }
+                                    }
+                                >>> foo(
+                                        tensor0,  # will be Replicate
+                                        tensor1,  # will be Shard(0)
+                                        tensor2,  # will be Shard(1)
+                                        tensor3,  # will be torch.Tenosr
+                                        d = tensor4 # will be Partial
+                                    )
 
-        is_model_sharded: is this model (parameters/buffers) already sharded?
-                            - `False` (Default): each rank holds a full model
-                            - `True`: each rank holds a only shard
-                            which will be used for initalization internally.
+        is_model_sharded (Optional): is this model (parameters/buffers) already sharded?
 
-        grad_sync: whether to turn on gradient synchronization (i.e., auto-allreduce `Partial` gradients) after backward pass.
+                                    Format:
+                                        - `False` (Default): each rank holds a full model
+                                        - `True`: each rank holds a only shard
+
+                                    Note: this arg will be used for initalization internally.
+
+        factory (Optional): whether to capture factory function (`torch.zeros`/`ones`/`empty`/`randn`/`full`/`arrange`) and convert it to DTensor during forward pass.
+                This is used for resolving mixed Tensor and DTensor compute in forward, as bad practice can initailize the torch.Tensor buffer
+                within `forward()` instead of within `Module.__init__()`. If this bad practice does happen, we can use this arg as a solver,
+                at the cost of extra dispatching overhead.
+
+                Format: `True` or `False` or `{ submodule_cls : { factory_func : <sharding placements> } }`
+                    - `True`: all submodules and all factory funcs will be converted to DTensor in `Replicate`.
+                    - `False` or `{}`: disable this factory function conversion to DTensor.
+                    - `{ submodule_cls : True }`: only this `submodule_cls`'s all factory function will be converted to DTensor in `Replicate`.
+                    - `{ submodule_cls : False or [] }`: exclude this `submodule_cls` for factory function conversion to DTensor.
+                    - `{ submodule_cls : { factory_func : <sharding placements> } }`: only this `submodule_cls`'s `factory_func` will be converted to DTensor in `<sharding placements>`.
+
+                Note: Currently, this factory converison:
+                    - only covers `forward()`
+                    - assumes same <sharding placements> for `factory_func`
+                    - does NOT support nested `submodule_cls`
+
+        grad_sync (Optional): whether to turn on gradient synchronization (i.e., auto-allreduce `Partial` gradients) after backward pass.
+
                     Format: `True` or `False` or `{ submodule_cls : (param_name1, param_name2, ...) }`
-                    where
-                    - `True`: looking for all `submodule_cls` and all `param_names` whose `Partial` gradients will be allreduced.
-                    - `False` or `{}`: disable gradient synchronization
-                    - `{ submodule_cls : True }`: only looking for this `submodule_cls`'s all `param_name` for gradient synchronization.
-                    - `{ submodule_cls : False or [] }`: exclude this `submodule_cls` for gradient synchronization.
-                    - `{ submodule_cls : [param_name1] }`: only looking for this `submodule_cls`'s `param_name1` for gradient synchronization.
+                        - `True`: looking for all `submodule_cls` and all `param_names` whose `Partial` gradients will be allreduced.
+                        - `False` or `{}`: disable gradient synchronization
+                        - `{ submodule_cls : True }`: only looking for this `submodule_cls`'s all `param_name` for gradient synchronization.
+                        - `{ submodule_cls : False or [] }`: exclude this `submodule_cls` for gradient synchronization.
+                        - `{ submodule_cls : [param_name1] }`: only looking for this `submodule_cls`'s `param_name1` for gradient synchronization.
 
                     Note:
                     - If turned on, use `finish_grad_sync()` to wait for the gradient synchronization finish.
@@ -160,18 +181,20 @@ def parallelize_module(
 
         device_mesh = DeviceMesh("cuda", [0, 1, 2, 3])
 
-        param_sharding_plan = {
-            "fc1.weight": [Shard(0)],
-            "fc1.bias": [Shard(0)],
-            "fc2.weight": [Shard(1)],
-            "fc2.bias": [Replicate()],
-        }
-        fwd_resharding_plan = {
-            "fc1.input": [[Replicate()]],
-            "fc2.output": [[Replicate()]],
+        sharding_plan = {
+            "parameter" : {
+                "fc1.weight": [Shard(0)],
+                "fc1.bias": [Shard(0)],
+                "fc2.weight": [Shard(1)],
+                "fc2.bias": [Replicate()],
+            },
+            "forward" : {
+                "fc1.input": [[Replicate()]],
+                "fc2.output": [[Replicate()]],
+            }
         }
 
-        dmlp = parallelize_module(mlp, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        dmlp = parallelize_module(mlp, device_mesh, sharding_plan)
         output = dmlp(input)
 
 
@@ -189,8 +212,24 @@ def parallelize_module(
         ...
         fake_model = deferred_init(MLP)
         ...
-        dmlp = parallelize_module(fake_model, device_mesh, param_sharding_plan, fwd_resharding_plan)
+        dmlp = parallelize_module(fake_model, device_mesh, sharding_plan)
 
+
+    Example:: using factory for converting tensor buffer in forward
+
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(8, 8)
+                self.fc2 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                x = torch.zeros(x.shape)
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        dmlp = parallelize_module(MLP(), ..., factory=True) # or factory = { MLP: {torch.zeros: [Replicate()]} }
 
     Example:: using gradient synchronization with customized target
 
@@ -226,6 +265,9 @@ def parallelize_module(
 
     # post-patch submodules
     DModule.post_patch_submodules(module)
+
+    # prepare dtensorizing factory
+    DModule.prepare_factory(module, factory)
 
     # prepare gradient sync
     DModule.prepare_grad_sync(module, grad_sync)

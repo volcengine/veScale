@@ -17,9 +17,11 @@ from torch.testing._internal.common_utils import run_tests
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import vescale
+
+from vescale import dtensor
 from vescale import DeviceMesh, Replicate, Shard, Partial
 from vescale.dtensor.random import manual_seed
+from vescale.dtensor.api import distribute_tensor
 
 
 class DTensorConstructorTest(DTensorTestBase):
@@ -110,7 +112,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_zeros(self):
         self._run_init_op(
             torch.zeros,
-            vescale.zeros,
+            dtensor.zeros,
             self._assert_equal,
             requires_grad=True,
         )
@@ -119,7 +121,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_ones(self):
         self._run_init_op(
             torch.ones,
-            vescale.ones,
+            dtensor.ones,
             self._assert_equal,
             requires_grad=True,
         )
@@ -128,7 +130,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_empty(self):
         self._run_init_op(
             torch.empty,
-            vescale.empty,
+            dtensor.empty,
             self._assert_eq_empty,
             requires_grad=True,
         )
@@ -137,7 +139,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_full(self):
         self._run_init_op(
             torch.full,
-            vescale.full,
+            dtensor.full,
             self._assert_equal,
             123.4,
             requires_grad=True,
@@ -148,7 +150,7 @@ class DTensorConstructorTest(DTensorTestBase):
     def test_randn(self):
         self._run_init_op(
             torch.randn,
-            vescale.randn,
+            dtensor.randn,
             self._assert_eq_empty,
             requires_grad=True,
         )
@@ -226,11 +228,39 @@ class DTensorConstructorTest(DTensorTestBase):
         # match
         self.assertEqual(global_tensor, expected_tensor)
 
-    @with_comms
     @skip_unless_torch_gpu
+    @with_comms
     def test_randn_value(self):
-        self._rand_init_self_compare(vescale.randn)
-        # self._rand_init_compare(torch.randn, vescale.randn) # NOTE: Upstream doesn't match
+        self._rand_init_self_compare(dtensor.randn)
+        # self._rand_init_compare(torch.randn, dtensor.randn) # NOTE: Upstream doesn't match
+
+    @with_comms
+    def test_arange(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        for start_end_step in [
+            (4,),
+            (5,),
+            (0, 4),
+            (0, 5),
+            (0, 4, 1),
+            (0, 5, 1),
+            (11, 22, 2),
+            (0, -10, -1),
+            (2, -100, -3),
+        ]:
+            for placements in [[Replicate()], [Shard(0)], [Partial()]]:
+                single = torch.arange(*start_end_step, device=self.device_type)
+                golden = distribute_tensor(torch.arange(*start_end_step), device_mesh, placements)
+                actual = dtensor.arange(*start_end_step, device_mesh=device_mesh, placements=placements)
+                self.assertTrue(dtensor.equal(actual, golden), msg=f"mismatch: {start_end_step}, {placements}")
+                self.assertTrue(
+                    torch.equal(single, golden.redistribute(placements=[Replicate()])._local_tensor),
+                    msg=f"mismatch: {start_end_step}, {placements}",
+                )
+                self.assertTrue(
+                    torch.equal(single, actual.redistribute(placements=[Replicate()])._local_tensor),
+                    msg=f"mismatch: {start_end_step}, {placements}",
+                )
 
     @with_comms
     def test_zeros_full_mesh(self):
@@ -238,7 +268,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         placements = [Shard(0)]
         size = [32, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
         self.assertEqual(local_tensor.size(), torch.Size([8, 3]))
@@ -250,7 +280,7 @@ class DTensorConstructorTest(DTensorTestBase):
 
         # 1d sharded unevenly
         size = [31, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
         if self.rank <= 2:
@@ -264,7 +294,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
         placements = [Shard(0), Replicate()]
         size = [32, 4]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
 
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
@@ -274,7 +304,7 @@ class DTensorConstructorTest(DTensorTestBase):
         # construct a device mesh with 2d: shard, shard
         placements = [Shard(0), Shard(1)]
         size = [32, 4]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
 
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
@@ -284,7 +314,7 @@ class DTensorConstructorTest(DTensorTestBase):
         # 2d sharded unevenly
         placements = [Shard(0), Shard(1)]
         size = [31, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
 
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
@@ -305,7 +335,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
         placements = [Shard(0)]
         size = [32, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
 
@@ -321,7 +351,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
         placements = [Partial()]
         size = [32, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
 
@@ -337,7 +367,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, sub_mesh_list)
         placements = [Shard(0)]
         size = [32, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
 
@@ -357,7 +387,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
         placements = [Shard(0), Shard(1)]
         size = [32, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
 
@@ -373,7 +403,7 @@ class DTensorConstructorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
         placements = [Shard(0), Partial()]
         size = [32, 3]
-        dist_tensor = vescale.zeros(size, device_mesh=mesh, placements=placements)
+        dist_tensor = dtensor.zeros(size, device_mesh=mesh, placements=placements)
         self.assertEqual(dist_tensor.size(), torch.Size(size))
         local_tensor = dist_tensor.to_local()
 
@@ -399,12 +429,12 @@ class DTensorConstructorTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
 
         def _assert_case(placements, local_shape, true_ranks):
-            dtensor = vescale.ones(global_shape, device_mesh=device_mesh, placements=placements)
+            dt = dtensor.ones(global_shape, device_mesh=device_mesh, placements=placements)
             if self.rank in true_ranks:
                 expected_tensor = torch.ones(local_shape, device=self.device_type)
             else:
                 expected_tensor = torch.zeros(local_shape, device=self.device_type)
-            self.assertEqual(dtensor.to_local(), expected_tensor)
+            self.assertEqual(dt.to_local(), expected_tensor)
 
         _assert_case([Shard(0), Partial()], (2, 4), (0, 2))
         _assert_case([Shard(1), Partial()], (4, 2), (0, 2))
