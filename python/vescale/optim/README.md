@@ -45,7 +45,7 @@ The compatibility of these two optimizers and `DDP` strategy is shown as follows
 
 ### `BasicOptimizer`
 
-See `<repo>/test/parallel/ddp_optim/test_ddp.py`.
+See `<repo>/test/parallel/ddp_optim/test_ddp.py`. 
 
 ### `DistributedOptimizer`
 

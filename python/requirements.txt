@@ -7,3 +7,5 @@ tqdm
 optree
 accelerate
 transformers==4.37.2
+grpcio
+grpcio-tools

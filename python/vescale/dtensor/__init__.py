@@ -8,30 +8,43 @@
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
+from numbers import Number
+import math
 from typing import Any, Optional, Sequence, Tuple, Union
 
 # Import all builtin dist tensor ops
 import torch
 
 import vescale.dtensor.random as random
-from vescale.dtensor._utils import compute_local_shape, is_zero_out_local_shard
+from vescale.dtensor._utils import (
+    compute_local_shape,
+    compute_local_shape_and_global_offset,
+    is_zero_out_local_shard,
+    equal,
+    allclose,
+)
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
 from vescale.dtensor.api import normalize_placements
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.ops.utils import normalize_to_torch_size
 from vescale.dtensor.placement_types import DTensorSpec, Placement, Replicate, TensorMeta
 
+__all__ = ["zeros", "ones", "empty", "full", "randn", "arange", "equal", "allclose"]
+
 
 def _dtensor_init_helper(
     init_op,
-    global_shape: Union[Tuple[int], Tuple[Sequence[int]]],
+    global_shape: Union[Sequence[int], Tuple[Sequence[int]], torch.Size, Tuple[torch.Size]],
     *,
     dtype: Optional[torch.dtype],
     layout: torch.layout,
     requires_grad: bool,
     device_mesh: Optional[DeviceMesh],
     placements: Optional[Sequence[Placement]],
-    fill_value: Optional[Any] = None,
+    fill_value: Optional[Number] = None,
+    arange_start: Optional[Number] = None,
+    arange_end: Optional[Number] = None,
+    arange_step: Optional[Number] = None,
 ) -> DTensor:
     # parse args
     global_shape = normalize_to_torch_size(global_shape)
@@ -68,6 +81,15 @@ def _dtensor_init_helper(
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):
             local_tensor = init_op(local_shape, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+    elif init_op == torch.arange:
+        # get local tensor shape and its offset in the global tensor
+        local_shape, global_offset = compute_local_shape_and_global_offset(global_shape, device_mesh, placements)
+        # initialize the local tensor
+        local_start = arange_start + global_offset[0] * arange_step
+        local_end = local_start + local_shape[0] * arange_step
+        local_tensor = torch.arange(
+            local_start, local_end, arange_step, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad
+        )
     else:
         raise NotImplementedError
 
@@ -89,7 +111,7 @@ def _dtensor_init_helper(
 
 
 def zeros(
-    *size,
+    *size: Union[int, Sequence[int], torch.Size],
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
@@ -101,9 +123,10 @@ def zeros(
     It will be on device type of device mesh; presetting default cuda rank is a must.
 
     Args:
-        size (int...): a sequence of integers defining the global shape of the output :class:`DTensor`.
-            Can be a variable number of arguments or a collection like a list or tuple.
-            E.g.: zeros(1,2,3..) or zeros([1,2,3..]) or zeros((1,2,3..))
+        size (int or Sequence[int] or torch.Size): a sequence of integers defining the global shape of the output :class:`DTensor`.
+            Can be a variable number of arguments or a collection like a list or tuple or a torch.Size.
+            E.g.: zeros(1,2,3..) or zeros([1,2,3..]) or zeros((1,2,3..)) or zeros(torch.Size([1, 2]))
+
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
@@ -129,7 +152,7 @@ def zeros(
 
 
 def ones(
-    *size,
+    *size: Union[int, Sequence[int], torch.Size],
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
@@ -141,9 +164,9 @@ def ones(
     It will be on device type of device mesh; presetting default cuda rank is a must.
 
     Args:
-        size (int...): a sequence of integers defining the global shape of the output :class:`DTensor`.
-            Can be a variable number of arguments or a collection like a list or tuple.
-            E.g.: ones(1,2,3..) or ones([1,2,3..]) or ones((1,2,3..))
+        size (int or Sequence[int] or torch.Size): a sequence of integers defining the global shape of the output :class:`DTensor`.
+            Can be a variable number of arguments or a collection like a list or tuple or a torch.Size.
+            E.g.: ones(1,2,3..) or ones([1,2,3..]) or ones((1,2,3..)) or ones(torch.Size([1, 2]))
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
@@ -170,7 +193,7 @@ def ones(
 
 
 def empty(
-    *size,
+    *size: Union[int, Sequence[int], torch.Size],
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
@@ -182,9 +205,9 @@ def empty(
     It will be on device type of device mesh; presetting default cuda rank is a must.
 
     Args:
-        size (int...): a sequence of integers defining the global shape of the output :class:`DTensor`.
-            Can be a variable number of arguments or a collection like a list or tuple.
-            E.g.: empty(1,2,3..) or empty([1,2,3..]) or empty((1,2,3..))
+        size (int or Sequence[int] or torch.Size): a sequence of integers defining the global shape of the output :class:`DTensor`.
+            Can be a variable number of arguments or a collection like a list or tuple or a torch.Size.
+            E.g.: empty(1,2,3..) or empty([1,2,3..]) or empty((1,2,3..)) or empty(torch.Size([1, 2]))
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
@@ -211,8 +234,8 @@ def empty(
 
 
 def full(
-    size,
-    fill_value,
+    size: Union[Sequence[int], torch.Size],
+    fill_value: Number,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
@@ -226,10 +249,10 @@ def full(
     It will be on device type of device mesh; presetting default cuda rank is a must.
 
     Args:
-        size (int...): a sequence of integers defining the global shape of the output :class:`DTensor`.
-            Can be a variable number of arguments or a collection like a list or tuple.
-            E.g.: full(1,2,3..) or full([1,2,3..]) or full((1,2,3..))
-        fill_value (Scalar): the value to fill the output tensor with.
+        size (Sequence[int] or torch.Size): a sequence of integers defining the global shape of the output :class:`DTensor`.
+            Can be a collection like a list or tuple or torch.Size.
+            E.g.: full([1,2,3..]) or full((1,2,3..)) or full(torch.Size([1, 2]))
+        fill_value (Number): the value to fill the output tensor with.
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
@@ -257,7 +280,7 @@ def full(
 
 
 def randn(
-    *size,
+    *size: Union[int, Sequence[int], torch.Size],
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
@@ -271,9 +294,10 @@ def randn(
     It will be on device type of device mesh; presetting default cuda rank is a must.
 
     Args:
-        size (int...): a sequence of integers defining the global shape of the output :class:`DTensor`.
-            Can be a variable number of arguments or a collection like a list or tuple.
-            E.g.: randn(1,2,3..) or randn([1,2,3..]) or randn((1,2,3..))
+        size (int or Sequence[int] or torch.Size): a sequence of integers defining the global shape of the output :class:`DTensor`.
+            Can be a variable number of arguments or a collection like a list or tuple or a torch.Size.
+            E.g.: randn(1,2,3..) or randn([1,2,3..]) or randn((1,2,3..)) or randn(torch.Size([1, 2]))
+
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
@@ -283,6 +307,7 @@ def randn(
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks.
         placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``Partial``
+
     Returns:
         A :class:`DTensor` object on each rank
     """
@@ -294,6 +319,64 @@ def randn(
         requires_grad=requires_grad,
         device_mesh=device_mesh,
         placements=placements,
+    )
+
+
+def arange(
+    *start_end_step: Number,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    requires_grad: bool = False,
+    device_mesh: Optional[DeviceMesh] = None,
+    placements: Optional[Sequence[Placement]] = None,
+) -> DTensor:
+    # NOTE: always out=None
+    """
+    Returns a 1-D tensor of size `ceil((end - start) / step)` with values from the interval [start, end)
+    taken with common difference step beginning from start.
+
+    Note that non-integer step is subject to floating point rounding errors when comparing against end;
+    to avoid inconsistency, we advise subtracting a small epsilon from end in such cases.
+
+    Args:
+        start (Number) - the starting value for the set of points. Default: 0.
+        end (Number) - the ending value for the set of points
+        step (Number) - the gap between each pair of adjacent points. Default: 1.
+
+    Keyword args:
+        dtype (torch.dtype, optional) - the desired data type of returned tensor. Default: if None, uses a global default (see torch.set_default_dtype()). If dtype is not given, infer the data type from the other input arguments. If any of start, end, or stop are floating-point, the dtype is inferred to be the default dtype, see get_default_dtype(). Otherwise, the dtype is inferred to be torch.int64.
+        layout (torch.layout) - the desired layout of returned Tensor. Default: torch.strided.
+        requires_grad (bool) - If autograd should record operations on the returned tensor. Default: False.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks.
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``Partial``
+
+    Returns:
+        A :class:`DTensor` object on each rank
+    """
+
+    if len(start_end_step) == 0:
+        raise ValueError("`arange` should take at least one positional arg!")
+    elif len(start_end_step) == 1:
+        start, end, step = 0, start_end_step[0], 1
+    elif len(start_end_step) == 2:
+        start, end, step = start_end_step[0], start_end_step[1], 1
+    elif len(start_end_step) == 3:
+        start, end, step = start_end_step
+    else:
+        raise ValueError("`arange` should take at most three positional args!")
+
+    size = math.ceil((end - start) / step)
+    return _dtensor_init_helper(
+        torch.arange,
+        size,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        device_mesh=device_mesh,
+        placements=placements,
+        arange_start=start,
+        arange_end=end,
+        arange_step=step,
     )
 
 

@@ -769,9 +769,6 @@ class FwdPlanTestWMixedArgs2(FwdPlanTestBase):
         self.assert_helper(out, expected_t)
 
     def _test_dict_fwd_plan(self):
-        fwd_plan = {".input": {"a": [Shard(0)], "b": [Shard(1)]}}
-
-    def _test_seq_fwd_plan(self):
         fwd_plan = {
             ".input": {
                 "a": [Shard(0)],  # a

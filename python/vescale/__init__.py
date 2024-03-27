@@ -25,14 +25,11 @@ import functools
 
 import torch
 import torch.utils._pytree as pytree
-
 from vescale.dmodule.api import parallelize_module, is_dmodule, PlacementsInterface
 from vescale.dtensor.api import normalize_placements, distribute_tensor, from_local, redistribute_dtensor, to_local
 from vescale.dtensor.device_mesh import DeviceMesh, init_device_mesh
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.placement_types import Placement, Partial, Replicate, Shard, InterleavedShard
-from vescale.dtensor import zeros, ones, empty, full, randn
-from vescale.dtensor._utils import equal, allclose
 from vescale.dmp import auto_parallelize_module, set_plan_overriding_policy, get_plan_overriding_policy
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel
 from vescale.optim.distributed_optimizer import DistributedOptimizer
@@ -60,13 +57,6 @@ __all__ = [
     "InterleavedShard",
     "from_local",
     "to_local",
-    "equal",
-    "allclose",
-    "zeros",
-    "ones",
-    "empty",
-    "full",
-    "randn",
     "deferred_init",
     "is_deferred",
     "materialize_dtensor",

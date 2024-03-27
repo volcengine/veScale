@@ -14,7 +14,7 @@ import torch.nn as nn
 from torch.cuda import memory_stats
 from torch.testing._internal.common_utils import run_tests
 
-import vescale
+from vescale import dtensor
 from vescale import Partial, Replicate, Shard, DeviceMesh, DTensor, distribute_tensor
 
 from common_dtensor import DTensorTestBase, with_comms, skip_unless_torch_version_bigger_than
@@ -68,7 +68,7 @@ class DTensorTestCuda(DTensorTestBase):
         # global_tensor = torch.empty_like(meta_dtensor, device=self.device_type).fill_(1.2)
         # global_tensor.requires_grad_(True)
         # if self.rank == 0: print(f"{global_tensor}")
-        # self.assertTrue(vescale.allclose(global_tensor, the_dtensor))
+        # self.assertTrue(dtensor.allclose(global_tensor, the_dtensor))
 
     @with_comms
     @skip_unless_torch_version_bigger_than(torch_version="2.2")
@@ -165,7 +165,7 @@ class DTensorTestCuda(DTensorTestBase):
         self.assertEqual(m1, m2)  # nn.Module has no .is_meta
         # materialize nn.Module's meta Tensor with DTensor
         model = parallelize_mlp(
-            lambda t, d, p: vescale.empty(
+            lambda t, d, p: dtensor.empty(
                 t.shape, dtype=t.dtype, requires_grad=t.requires_grad, device_mesh=d, placements=p
             ),
             model,

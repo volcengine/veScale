@@ -102,12 +102,16 @@ class TestNanoGPT(DTensorTestBase):
         gptconf = GPTConfig(**model_args)
 
         # initialize model
-        with DeviceMesh(self.device_type, torch.arange(self.world_size)):  # + + +
-            model = GPT(gptconf)
-            dmodel = auto_parallelize_module(model, policy="MEGATRON")  # + + +
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model = GPT(gptconf)
+        dmodel = auto_parallelize_module(model, device_mesh, policy="MEGATRON")  # + + +
 
         # training loop
         for X, Y in data_set:
+            X = distribute_tensor(X, device_mesh, [Replicate()])
+            Y = distribute_tensor(Y, device_mesh, [Replicate()])
             logits, loss = dmodel(X, Y)
             loss.backward()
 

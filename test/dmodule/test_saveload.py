@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import run_tests
 
 from common_dtensor import DTensorTestBase, with_comms_device
 
-import vescale
+from vescale import dtensor
 from vescale.dtensor.api import DeviceMesh
 from vescale.dmodule.api import parallelize_module
 from vescale.initialize.deferred_init import deferred_init
@@ -75,7 +75,7 @@ class DModuleTestSL(DTensorTestBase):
         self.assertEqual(len(dist_sd1), len(dist_sd2))
         for (k1, v1), (k2, v2) in zip(dist_sd1.items(), dist_sd2.items()):
             self.assertEqual(k1, k2)
-            self.assertTrue(vescale.equal(v1, v2, exact_device))
+            self.assertTrue(dtensor.equal(v1, v2, exact_device))
 
     def _run_save(self, device_type: str):
         device_mesh = DeviceMesh(device_type, list(range(self.world_size)))
@@ -110,7 +110,7 @@ class DModuleTestSL(DTensorTestBase):
         input_tensor = input_golden.detach().clone()
 
         # match forward
-        self.assertTrue(vescale.allclose(dmlp(input_tensor), dmlp_golden(input_golden)))
+        self.assertTrue(dtensor.allclose(dmlp(input_tensor), dmlp_golden(input_golden)))
 
     @with_comms_device(device_type="cpu")
     def test_cpu(self):

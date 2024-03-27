@@ -1,18 +1,16 @@
 ################################################################################
-# MIT License
-#
 # Copyright (c) 2022 Andrej Karpathy
-#
+
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-#
+
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-#
+
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,8 +21,14 @@
 ################################################################################
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
-
-"""Source: https://github.com/karpathy/nanoGPT/blob/master/model.py commit: f08abb4"""
+"""
+Full definition of a GPT Language Model, all of it in this single file.
+References:
+1) the official GPT-2 TensorFlow implementation released by OpenAI:
+https://github.com/openai/gpt-2/blob/master/src/model.py
+2) huggingface/transformers PyTorch implementation:
+https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
+"""
 
 import math
 import inspect
@@ -180,7 +184,7 @@ class GPT(nn.Module):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
 
         # report number of parameters
-        print("number of parameters: %.2fM" % (self.get_num_params() / 1e6))  # noqa: UP031
+        print(f"number of parameters: {self.get_num_params() / 1e6: .2f}M")
 
     def get_num_params(self, non_embedding=True):
         """
@@ -213,10 +217,10 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)  # (b, t, n_embd)
+        x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
-            x = block(x)  # (b, t, n_embd)
-        x = self.transformer.ln_f(x)  # (b, t, n_embd)
+            x = block(x)
+        x = self.transformer.ln_f(x)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
@@ -242,7 +246,7 @@ class GPT(nn.Module):
 
     @classmethod
     def from_pretrained(cls, model_type, override_args=None):
-        assert model_type in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
+        assert model_type in {"gpt2-small", "gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
         override_args = override_args or {}  # default to empty dict
         # only dropout can be overridden see more notes below
         assert all(k == "dropout" for k in override_args)
@@ -251,12 +255,15 @@ class GPT(nn.Module):
         print("loading weights from pretrained gpt: %s" % model_type)
 
         # n_layer, n_head and n_embd are determined from model_type
+        # + + + add a gpt2-small option for smaller experiments
         config_args = {
+            "gpt2-small": dict(n_layer=1, n_head=12, n_embd=768),  # 10M params
             "gpt2": dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
             "gpt2-medium": dict(n_layer=24, n_head=16, n_embd=1024),  # 350M params
             "gpt2-large": dict(n_layer=36, n_head=20, n_embd=1280),  # 774M params
             "gpt2-xl": dict(n_layer=48, n_head=25, n_embd=1600),  # 1558M params
         }[model_type]
+        # + + + add a gpt2-small option for smaller experiments
         print("forcing vocab_size=50257, block_size=1024, bias=True")
         config_args["vocab_size"] = 50257  # always 50257 for GPT model checkpoints
         config_args["block_size"] = 1024  # always 1024 for GPT model checkpoints
@@ -273,24 +280,52 @@ class GPT(nn.Module):
         sd_keys = [k for k in sd_keys if not k.endswith(".attn.bias")]  # discard this mask / buffer, not a param
 
         # init a huggingface/transformers model
-        model_hf = GPT2LMHeadModel.from_pretrained(model_type)
-        sd_hf = model_hf.state_dict()
+        if model_type == "gpt2-small":
+            model_hf = GPT2LMHeadModel.from_pretrained("gpt2")
+        else:
+            model_hf = GPT2LMHeadModel.from_pretrained(model_type)
+        # + + + Split c_attn into 3 parts: q_proj, k_proj, v_proj
+        sd_hf = dict(model_hf.state_dict())
 
         # copy while ensuring all of the parameters are aligned and match in names and shapes
-        sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith(".attn.masked_bias")]  # ignore these, just a buffer
+        sd_keys_hf = list(sd_hf.keys())
+        for k in sd_keys_hf:
+            if "c_attn.weight" in k:
+                v = sd_hf[k]
+                q_proj, k_proj, v_proj = v.split(config_args["n_embd"], dim=1)
+                sd_hf[k.replace("c_attn", "q_proj")] = q_proj
+                sd_hf[k.replace("c_attn", "k_proj")] = k_proj
+                sd_hf[k.replace("c_attn", "v_proj")] = v_proj
+                sd_hf.pop(k)
+            elif "c_attn.bias" in k:
+                v = sd_hf[k]
+                q_bias, k_bias, v_bias = v.split(config_args["n_embd"])
+                sd_hf[k.replace("c_attn", "q_proj")] = q_bias
+                sd_hf[k.replace("c_attn", "k_proj")] = k_bias
+                sd_hf[k.replace("c_attn", "v_proj")] = v_bias
+                sd_hf.pop(k)
+        # + + + Split c_attn into 3 parts: q_proj, k_proj, v_proj
+        sd_keys_hf = [k for k in sd_hf.keys() if not k.endswith(".attn.masked_bias")]  # ignore these, just a buffer
         sd_keys_hf = [k for k in sd_keys_hf if not k.endswith(".attn.bias")]  # same, just the mask (buffer)
-        transposed = ["attn.c_attn.weight", "attn.c_proj.weight", "mlp.c_fc.weight", "mlp.c_proj.weight"]
+        transposed = [
+            "attn.q_proj.weight",
+            "attn.k_proj.weight",
+            "attn.v_proj.weight",
+            "attn.c_proj.weight",
+            "mlp.c_fc.weight",
+            "mlp.c_proj.weight",
+        ]
         # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
         # this means that we have to transpose these weights when we import them
-        assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        if model_type != "gpt2-small":
+            assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
         for k in sd_keys_hf:
-            if any(k.endswith(w) for w in transposed):
+            if any(k.endswith(w) for w in transposed) and k in sd_keys:
                 # special treatment for the Conv1D weights we need to transpose
                 assert sd_hf[k].shape[::-1] == sd[k].shape
                 with torch.no_grad():
                     sd[k].copy_(sd_hf[k].t())
-            else:
+            elif k in sd_keys:
                 # vanilla copy over the other parameters
                 assert sd_hf[k].shape == sd[k].shape
                 with torch.no_grad():
@@ -299,10 +334,8 @@ class GPT(nn.Module):
         return model
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
-        # start with all of the candidate parameters
-        param_dict = {pn: p for pn, p in self.named_parameters()}  # noqa: C416
         # filter out those that do not require grad
-        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
         decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
@@ -321,7 +354,6 @@ class GPT(nn.Module):
         extra_args = dict(fused=True) if use_fused else dict()
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
         print(f"using fused AdamW: {use_fused}")
-
         return optimizer
 
     def estimate_mfu(self, fwdbwd_per_iter, dt):
