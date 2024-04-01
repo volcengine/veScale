@@ -1,4 +1,4 @@
-#! usr/bin/bash
+#!/usr/bin/bash
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -13,7 +13,7 @@ fi
 
 git clone --branch v2.2.1-rc3 --depth 1 https://github.com/pytorch/pytorch.git
 pushd pytorch 
-git apply $PATCH_PATH
+git apply "$PATCH_PATH"
 git submodule sync 
 git submodule update --init --recursive --depth 1
 pip3 install -r requirements.txt
