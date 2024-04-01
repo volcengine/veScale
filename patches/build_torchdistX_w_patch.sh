@@ -1,4 +1,4 @@
-#! usr/bin/bash
+#!/usr/bin/bash
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -15,7 +15,7 @@ git clone --depth 1 https://github.com/pytorch/torchdistx.git
 pushd torchdistx
 git pull
 git checkout 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a
-git apply $PATCH_PATH
+git apply "$PATCH_PATH"
 git submodule sync
 git submodule update --init --recursive --depth 1
 cmake -DTORCHDIST_INSTALL_STANDALONE=ON  -GNinja -DCAKE_CXX_COMPILER_LAUNCHER=ccache -B build
