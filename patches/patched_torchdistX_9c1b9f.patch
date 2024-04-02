@@ -1,12 +1,20 @@
-Subject: [PATCH] support torch 2.1
----
-Index: src/cc/torchdistx/deferred_init.cc
-<+>UTF-8
-===================================================================
+diff --git a/setup.py b/setup.py
+index a4102b5..b468cb1 100644
+--- a/setup.py
++++ b/setup.py
+@@ -173,7 +173,6 @@ def main() -> None:
+         zip_safe=False,
+         # Since PyTorch does not offer ABI compatibility we have to make sure
+         # that we use the same version that was used at build time.
+-        install_requires=[f"torch=={torch.__version__}"],
+         classifiers=[
+             "Development Status :: 3 - Alpha",
+             "Intended Audience :: Developers",
 diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_init.cc
---- a/src/cc/torchdistx/deferred_init.cc	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
-+++ b/src/cc/torchdistx/deferred_init.cc	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
-@@ -173,6 +173,7 @@
+index 961b638..0a29d9f 100644
+--- a/src/cc/torchdistx/deferred_init.cc
++++ b/src/cc/torchdistx/deferred_init.cc
+@@ -173,6 +173,7 @@ class Op {
    }
 
    void materialize();
@@ -14,7 +22,7 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
 
    std::size_t num_outputs() const noexcept {
      return num_outputs_;
-@@ -220,7 +221,6 @@
+@@ -220,7 +221,6 @@ Op Op::fromOperatorHandle(const OperatorHandle& handle, Stack s) {
    };
 
    const FunctionSchema& shm = handle.schema();
@@ -22,7 +30,7 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
    return Op{shm.name(), std::move(fn), shm.arguments().size(), shm.returns().size(), std::move(s)};
  }
 
-@@ -271,6 +271,44 @@
+@@ -271,6 +271,44 @@ void Op::materialize() {
    materialized_ = true;
  }
 
@@ -67,7 +75,7 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
  const Tensor& Op::getOutput(std::size_t idx) const noexcept {
    const Tensor* opt_out = nullptr;
 
-@@ -343,6 +381,8 @@
+@@ -343,6 +381,8 @@ class OpNode {
    // Materializes the operation held by this node along with all the operations
    // in its recorded call stack.
    void materialize();
@@ -76,7 +84,7 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
 
   private:
    void buildCallStack();
-@@ -527,6 +567,30 @@
+@@ -527,6 +567,30 @@ void OpNode::materialize() {
    call_stack_.clear();
  }
 
@@ -107,10 +115,17 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
  void OpNode::buildCallStack() {
    OpNode* last_node = getLastInPlaceOpNode();
 
-@@ -717,6 +781,24 @@
+@@ -728,6 +792,24 @@ Tensor materialize(const Tensor& fake) {
+   return out;
+ }
 
-   output_desc.node()->materialize();
-
++Tensor materialize_with_shape(const Tensor& fake, c10::IntArrayRef shape, const c10::optional<c10::Device> device) {
++  TensorRecord& record = getTensorRecord(fake);
++
++  const OpOutputDescriptor& output_desc = record.output_descriptor();
++
++  output_desc.node()->materializeWithShape(shape, device);
++
 +  Tensor out = output_desc.node()->op().getOutput(output_desc.output_index());
 +
 +  // Unfortunately there is no way for us to track calls to `requires_grad_()`,
@@ -122,17 +137,10 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
 +  return out;
 +}
 +
-+Tensor materialize_with_shape(const Tensor& fake, c10::IntArrayRef shape, const c10::optional<c10::Device> device) {
-+  TensorRecord& record = getTensorRecord(fake);
-+
-+  const OpOutputDescriptor& output_desc = record.output_descriptor();
-+
-+  output_desc.node()->materializeWithShape(shape, device);
-+
-   Tensor out = output_desc.node()->op().getOutput(output_desc.output_index());
-
-   // Unfortunately there is no way for us to track calls to `requires_grad_()`,
-@@ -1032,6 +1114,12 @@
+ // The catch-all handler for the `DeferredInit` dispatch key.
+ class DeferredInitHandler {
+  public:
+@@ -1032,6 +1114,12 @@ class ProxyVariableHooks : public VariableHooksInterface {
      inner_->requires_grad_(self, value);
    }
 
@@ -145,7 +153,7 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
    VariableHooksInterface* inner() noexcept {
      return inner_;
    }
-@@ -1164,6 +1252,7 @@
+@@ -1164,6 +1252,7 @@ bool canMaterialize(const Tensor& tensor) noexcept {
    return isFake(tensor) && unsafeAsFake(tensor).hasData(DispatchKey::DeferredInit);
  }
 
@@ -153,7 +161,7 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
  Tensor materializeTensor(const Tensor& tensor) {
    if (canMaterialize(tensor)) {
      return detail::materialize(tensor);
-@@ -1172,4 +1261,24 @@
+@@ -1172,4 +1261,24 @@ Tensor materializeTensor(const Tensor& tensor) {
    }
  }
 
@@ -178,12 +186,10 @@ diff --git a/src/cc/torchdistx/deferred_init.cc b/src/cc/torchdistx/deferred_ini
 +}
 +
  }  // namespace torchdistx
-Index: src/cc/torchdistx/deferred_init.h
-<+>UTF-8
-===================================================================
 diff --git a/src/cc/torchdistx/deferred_init.h b/src/cc/torchdistx/deferred_init.h
---- a/src/cc/torchdistx/deferred_init.h	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
-+++ b/src/cc/torchdistx/deferred_init.h	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+index afda4cb..4c654cf 100644
+--- a/src/cc/torchdistx/deferred_init.h
++++ b/src/cc/torchdistx/deferred_init.h
 @@ -8,6 +8,8 @@
 
  #include <c10/core/DispatchKey.h>
@@ -193,7 +199,7 @@ diff --git a/src/cc/torchdistx/deferred_init.h b/src/cc/torchdistx/deferred_init
 
  #include "macros.h"
 
-@@ -27,9 +29,10 @@
+@@ -27,9 +29,10 @@ TDX_API void leaveDeferredInit() noexcept;
 
  // Indicates whether `tensor` has been constructed in a deferred-init context.
  TDX_API bool canMaterialize(const at::Tensor& tensor) noexcept;
@@ -205,12 +211,10 @@ diff --git a/src/cc/torchdistx/deferred_init.h b/src/cc/torchdistx/deferred_init
 
  // Temporarily disables deferred-init.
  class TDX_API NoDeferredInit {
-Index: src/python/torchdistx/_C.pyi
-<+>UTF-8
-===================================================================
 diff --git a/src/python/torchdistx/_C.pyi b/src/python/torchdistx/_C.pyi
---- a/src/python/torchdistx/_C.pyi	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
-+++ b/src/python/torchdistx/_C.pyi	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+index 82c8421..9e4462a 100644
+--- a/src/python/torchdistx/_C.pyi
++++ b/src/python/torchdistx/_C.pyi
 @@ -5,12 +5,17 @@
  # LICENSE file in the root directory of this source tree.
 
@@ -229,12 +233,10 @@ diff --git a/src/python/torchdistx/_C.pyi b/src/python/torchdistx/_C.pyi
  def materialize_tensor(tensor: torch.Tensor) -> torch.Tensor: ...
 +def materialize_tensor_with_local_shape(tensor: torch.Tensor, shape: Sequence[Union[_int, SymInt]], device: Optional[Union[_device, str, None]] = None) -> torch.Tensor: ...
  def meta_like(fake: torch.Tensor) -> torch.Tensor: ...
-Index: src/python/torchdistx/_C/deferred_init.cc
-<+>UTF-8
-===================================================================
 diff --git a/src/python/torchdistx/_C/deferred_init.cc b/src/python/torchdistx/_C/deferred_init.cc
---- a/src/python/torchdistx/_C/deferred_init.cc	(revision 9c1b9f5cb2fa36bfb8b70ec07c40ed42a33cc87a)
-+++ b/src/python/torchdistx/_C/deferred_init.cc	(revision bcaaffbacc41342429ccd002aece151b0fd4e227)
+index 7eb73b8..d810544 100644
+--- a/src/python/torchdistx/_C/deferred_init.cc
++++ b/src/python/torchdistx/_C/deferred_init.cc
 @@ -8,6 +8,7 @@
 
  #include <ATen/Tensor.h>
@@ -243,7 +245,7 @@ diff --git a/src/python/torchdistx/_C/deferred_init.cc b/src/python/torchdistx/_
  #include <torch/csrc/PyInterpreter.h>
  #include <torch/csrc/autograd/python_variable.h>
  #include <torch/csrc/utils/pybind.h>
-@@ -94,14 +95,58 @@
+@@ -94,14 +95,58 @@ py::object materializeVariable(const py::object& var) {
    return makeVariable(Py_TYPE(naked_var), std::move(materialized_data));
  }
 
@@ -303,3 +305,45 @@ diff --git a/src/python/torchdistx/_C/deferred_init.cc b/src/python/torchdistx/_
  }
 
  }  // namespace torchdistx::python
+diff --git a/src/python/torchdistx/_C/fake.cc b/src/python/torchdistx/_C/fake.cc
+index 70e0e3c..538a3b5 100644
+--- a/src/python/torchdistx/_C/fake.cc
++++ b/src/python/torchdistx/_C/fake.cc
+@@ -8,7 +8,12 @@
+
+ #include <ATen/Context.h>
+ #include <ATen/Tensor.h>
++#include <torch/torch.h>
++#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR>=3
++#include <torch/csrc/utils/device_lazy_init.h>
++#else
+ #include <torch/csrc/utils/cuda_lazy_init.h>
++#endif
+ #include <torch/csrc/utils/pybind.h>
+ #include <torchdistx/fake.h>
+
+@@ -22,7 +27,12 @@ void pyEnterFakeMode(bool fake_cuda) {
+   // subsystem which would fail and prevent us from instantiating CUDA devices.
+   if (fake_cuda) {
+     if (!at::hasCUDA()) {
++
++#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR>=3
++      torch::utils::set_requires_device_init(at::kCUDA, false);
++#else
+       torch::utils::set_requires_cuda_init(false);
++#endif
+     }
+   }
+ }
+@@ -31,7 +41,11 @@ void pyLeaveFakeMode() {
+   leaveFakeMode();
+
+   if (!isFakeModeActive() && !at::hasCUDA()) {
++#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR>=3
++      torch::utils::set_requires_device_init(at::kCUDA, true);
++#else
+     torch::utils::set_requires_cuda_init(true);
++#endif
+   }
+ }
+
