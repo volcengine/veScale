@@ -1,0 +1,31 @@
+name: VeScale Unit Tests
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+
+  Run-all-tests:
+
+    runs-on: [self-hosted, Linux, X64, GPU]
+
+    container:
+      image: ghcr.io/volcengine/vescale:latest
+
+      options: --gpus=all --shm-size=400g
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: run-test.sh
+        run: ls && pwd && bash ./scripts/run_test.sh
+
+
