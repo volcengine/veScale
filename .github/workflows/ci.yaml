@@ -18,7 +18,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, GPU]
 
     container:
-      image: ghcr.io/jc-bytedance/vescale:latest
+      image: ghcr.io/volcengine/vescale:latest
 
       options: --gpus=all --shm-size=400g
 
