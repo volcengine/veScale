@@ -12,7 +12,7 @@ We are refactoring our [internal LLM training system](https://arxiv.org/abs/2402
 
 ### From Source
 
-#### Install a Patched Version of PyTorch (optional)
+#### Install a Patched Version of PyTorch
 
 ```bash
 bash patches/build_pytorch_w_patch.sh
