@@ -20,14 +20,14 @@ import torch.distributed as dist
 from torch import nn
 from torch.testing._internal.common_utils import run_tests
 
-from common_dtensor import DTensorTestBase, with_comms_device
+from common_dtensor import DTensorTestBase, with_comms_device, with_comms
 
 from vescale.dmodule.api import parallelize_module
 from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.placement_types import Replicate, Shard
 
 
-config = {"seq_length": 8, "head_size": 4, "hidden_size": 4 * 4, "n_head": 4, "batch_size": 4}
+CONFIG = {"batch_size": 4, "seq_length": 4, "hidden_size": 4}
 
 
 class MLP(nn.Module):
@@ -71,18 +71,14 @@ fwd_resharding_plan2 = {
 }
 
 
-class DMLP(nn.Module):
+class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.fc1 = nn.Linear(config["hidden_size"], config["hidden_size"] * 4)
-        self.gelu = torch.nn.GELU()
-        self.fc2 = nn.Linear(config["hidden_size"] * 4, config["hidden_size"])
+        self.ln = nn.LayerNorm(config["hidden_size"], bias=False)
+        self.mlp = MLP(config)
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.gelu(x)
-        x = self.fc2(x)
-        return x
+        return self.mlp(self.ln(x))
 
 
 class DModuleTestPlans(DTensorTestBase):
@@ -94,20 +90,20 @@ class DModuleTestPlans(DTensorTestBase):
         device_mesh = DeviceMesh(devce_type, list(range(self.world_size)))
 
         # create golden model (local replicate)
-        mlp_golden = MLP(config)
+        mlp_golden = MLP(CONFIG)
         mlp_golden.to(devce_type)
         for name, param in mlp_golden.named_parameters():
             dist.all_reduce(param, async_op=False)
 
         # create dmodule (by plans)
-        dmlp = DMLP(config)
+        dmlp = MLP(CONFIG)
         dmlp.to(devce_type)
         dmlp.load_state_dict(mlp_golden.state_dict())
         parallelize_module(dmlp, device_mesh, {"parameter": param_sharding_plan, "forward": fwd_resharding_plan})
 
         # create data (local replicate)
         input_golden = torch.randn(
-            config["batch_size"] * config["seq_length"], config["hidden_size"], device=devce_type, requires_grad=False
+            CONFIG["batch_size"] * CONFIG["seq_length"], CONFIG["hidden_size"], device=devce_type, requires_grad=False
         )
         dist.all_reduce(input_golden, async_op=False)
         input_tensor = input_golden.detach().clone()
@@ -146,11 +142,59 @@ class DModuleTestPlans(DTensorTestBase):
     def test_wrong_plan(self):
         device_mesh = DeviceMesh("cuda", list(range(self.world_size)))
         # create dmodule (by plans)
-        dmlp = DMLP(config)
+        mlp = MLP(CONFIG)
         with self.assertRaises(KeyError):
-            parallelize_module(dmlp, device_mesh, {"parameters": param_sharding_plan1, "forward": fwd_resharding_plan1})
+            parallelize_module(mlp, device_mesh, {"parameters": param_sharding_plan1, "forward": fwd_resharding_plan1})
         with self.assertRaises(KeyError):
-            parallelize_module(dmlp, device_mesh, {"parameter": param_sharding_plan1, "forwards": fwd_resharding_plan1})
+            parallelize_module(mlp, device_mesh, {"parameter": param_sharding_plan1, "forwards": fwd_resharding_plan1})
+
+    @with_comms
+    def test_tp_plan(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        sharding_plan = {
+            "parameter": {
+                "mlp.fc1.weight": [Shard(0)],
+                "mlp.fc1.bias": [Shard(0)],
+                "mlp.fc2.weight": [Shard(1)],
+                "mlp.fc2.bias": [Replicate()],
+            },
+            "forward": {
+                "input": [[Replicate()]],
+                "ln.input": [[Replicate()]],  # no SP
+                "mlp.input": [[Replicate()]],
+                "mlp.fc2.output": [[Replicate()]],
+            },
+        }
+
+        dmodel = parallelize_module(Block(CONFIG), device_mesh, sharding_plan)
+        input = torch.ones((CONFIG["batch_size"], CONFIG["seq_length"], CONFIG["hidden_size"]), requires_grad=True)
+        output = dmodel(input).to_local()
+        output.sum().backward()
+
+    @with_comms
+    def test_tp_sp_plan(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        sharding_plan = {
+            "parameter": {
+                "mlp.fc1.weight": [Shard(0)],
+                "mlp.fc1.bias": [Shard(0)],
+                "mlp.fc2.weight": [Shard(1)],
+                "mlp.fc2.bias": [Replicate()],
+            },
+            "forward": {
+                "input": [[Replicate()]],
+                "ln.input": [[Shard(1)]],  # SP
+                "mlp.input": [[Replicate()]],
+                "mlp.fc2.output": [[Replicate()]],
+            },
+        }
+
+        dmodel = parallelize_module(Block(CONFIG), device_mesh, sharding_plan)
+        input = torch.ones((CONFIG["batch_size"], CONFIG["seq_length"], CONFIG["hidden_size"]), requires_grad=True)
+        output = dmodel(input).to_local()
+        output.sum().backward()
 
 
 if __name__ == "__main__":

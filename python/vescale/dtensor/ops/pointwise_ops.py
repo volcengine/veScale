@@ -55,6 +55,8 @@ linear_pointwise_ops = [
     aten.to.dtype,
     aten.add.Tensor,
     aten.add_.Tensor,
+    aten.neg.default,
+    aten.neg_.default,
 ]
 
 pointwise_ops = [
@@ -298,9 +300,7 @@ pointwise_ops = [
     aten.nan_to_num.out,
     aten.nan_to_num_.default,
     aten.ne.Scalar,
-    aten.neg.default,
     aten.neg.out,
-    aten.neg_.default,
     aten.nextafter.default,
     aten.nextafter.out,
     aten.nextafter_.default,
@@ -323,6 +323,7 @@ pointwise_ops = [
     aten.rad2deg.out,
     aten.rad2deg_.default,
     aten.relu.default,
+    aten.triu.default,
     aten.relu_.default,
     aten.remainder.Scalar,
     aten.remainder.Scalar_Tensor,
@@ -406,6 +407,16 @@ pointwise_ops = [
 
 
 def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False) -> StrategyType:
+    # (Hongyu): allow pointwise P mul/div R
+    if op_schema.op in [aten.mul.Tensor, aten.div.Tensor]:
+        placements_a = op_schema.args_schema[0].strategies[0].output_spec.placements
+        if isinstance(op_schema.args_schema[1], float):
+            linearity = True
+        elif isinstance(op_schema.args_schema[1], OpStrategy):
+            spec_b = op_schema.args_schema[1].strategies[0].output_spec
+            if len(placements_a) == 1 and placements_a[0].is_partial() and spec_b.is_replicated():
+                linearity = True
+
     max_shards_strategy_index = -1
     max_shards = -1
     # handle broadcasting

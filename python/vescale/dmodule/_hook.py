@@ -51,7 +51,14 @@ def _convert_by_pi(
             return x
         return x.redistribute(device_mesh, pi.placements, async_op=pi.async_op)
     if isinstance(x, torch.Tensor):
-        return DTensor.from_local(x, device_mesh, pi.placements, run_check=pi.run_check, async_input=pi.async_op)
+        return DTensor.from_local(
+            x,
+            device_mesh,
+            pi.placements,
+            run_check=pi.run_check,
+            support_uneven=pi.support_uneven,
+            async_input=pi.async_op,
+        )
     if not raise_err:
         logging.info("binding a placement %s with a %s obj: %s. The placement is ignored.", pi.placements, type(x), x)
         return x
@@ -198,9 +205,9 @@ class PostHookOutput:
         output_pis: FwdPIs,
     ):
         if isinstance(output, Sequence) and isinstance(output_pis, Sequence):
-            assert len(output) == len(
-                output_pis
-            ), f"Mismatched actual output size: {output} vs. plaments size: {output_pis}!"
+            assert (
+                len(output) == len(output_pis)
+            ), f"Mismatched actual output size: {[x._spec if isinstance(x, DTensor) else x for x in output]} vs. plaments size: {output_pis}!"
             return [PostHookOutput._convert(o, pi, device_mesh) for o, pi in zip(output, output_pis)]
         if isinstance(output, DTensor) and output_pis[0] is not None:
             return PostHookOutput._convert(output, output_pis[0], device_mesh)

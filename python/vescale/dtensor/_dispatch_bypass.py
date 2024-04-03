@@ -15,7 +15,6 @@ import torch
 from vescale.dtensor.op_schema import (
     DTensorSpec,
     OpInfo,
-    OpSchema,
     OutputSharding,
 )
 from vescale.dtensor.placement_types import TensorMeta
@@ -99,36 +98,64 @@ class BypassOpShardingProp:
             aten._to_copy.default: BypassOpShardingProp.copy_handler,
             aten._local_scalar_dense.default: BypassOpShardingProp.scalar_handler,
             aten.equal.default: BypassOpShardingProp.scalar_handler,
+            aten.nonzero.default: BypassOpShardingProp.nonzero_handler,
         }
 
     def apply(self, op_info: OpInfo) -> bool:
         is_bypass = op_info.schema.op in self.op_handlers
         if is_bypass:
-            op_info.output_sharding = self.op_handlers[op_info.schema.op](op_info.schema)
+            op_info.output_sharding = self.op_handlers[op_info.schema.op](op_info)
             return True
         else:
             return False
 
     @staticmethod
-    def copy_handler(op_schema: OpSchema) -> OutputSharding:
-        kwargs = op_schema.gen_fake_kwargs()
-        dtype = kwargs["dtype"]
+    def nonzero_handler(op_info: OpInfo) -> OutputSharding:
+        """
+        Bypass nonzero because the output shape is dynamic.
+        We allow only replication on the input/ouput.
+        """
+        op_schema = op_info.schema
+        input_spec = op_schema.args_schema[0]
+        all_replicate = all(p.is_replicate() for p in input_spec.placements)
+        assert all_replicate, "input placement has to be replicate"
+        input_local = op_info.local_args[0]
+        output_local = torch.nonzero(input_local)
         out_tensor_meta = TensorMeta(
-            shape=op_schema.args_spec[0].tensor_meta.shape,
-            stride=op_schema.args_spec[0].tensor_meta.stride,
-            dtype=dtype,
+            shape=output_local.shape,
+            stride=output_local.stride(),
+            dtype=output_local.dtype,
         )
         return OutputSharding(
             output_spec=DTensorSpec(
-                mesh=op_schema.args_spec[0].mesh,
-                placements=op_schema.args_spec[0].placements,
+                mesh=op_info.schema.args_spec[0].mesh,
+                placements=op_info.schema.args_spec[0].placements,
                 tensor_meta=out_tensor_meta,
             )
         )
 
     @staticmethod
-    def scalar_handler(op_schema: OpSchema) -> OutputSharding:
-        return OutputSharding(None, [op_schema])
+    def copy_handler(op_info: OpInfo) -> OutputSharding:
+        op_schema = op_info.schema
+        kwargs = op_schema.gen_fake_kwargs()
+        dtype = kwargs["dtype"]
+        args_spec0 = op_schema.args_spec[0]
+        out_tensor_meta = TensorMeta(
+            shape=args_spec0.tensor_meta.shape,
+            stride=args_spec0.tensor_meta.stride,
+            dtype=dtype,
+        )
+        return OutputSharding(
+            output_spec=DTensorSpec(
+                mesh=args_spec0.mesh,
+                placements=args_spec0.placements,
+                tensor_meta=out_tensor_meta,
+            )
+        )
+
+    @staticmethod
+    def scalar_handler(op_info: OpInfo) -> OutputSharding:
+        return OutputSharding(None, [op_info.schema])
 
 
 _bypass_op_sharding_prop = BypassOpShardingProp()

@@ -91,13 +91,12 @@ def _reshard_to_replicate_with_pad_one_dim(
     This function all_gather all shards and return a tensor that
     is replicated on the previously sharded mesh dimension
     """
+    # if rank is not part of mesh, we simply return local_tensor, which should be an empty tensor
     my_coordinate = mesh.get_coordinate()
-    num_chunks = mesh.size(dim=mesh_dim)
-
     if my_coordinate is None:
-        # if rank is not part of mesh, we simply return local_tensor,
-        # which should be an empty tensor
         return local_tensor
+
+    num_chunks = mesh.size(dim=mesh_dim)
 
     # check if it needs to pad input tensor before all_gather
     full_chunk_size = (size[shard_dim] + num_chunks - 1) // num_chunks
@@ -156,14 +155,14 @@ def _scatter_tensor_by_shard(tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: i
     shard and scatter a tensor on a mesh dimension (use coordinate
     0 on the mesh dimension as source of truth)
     """
+    # if rank is not part of mesh, we simply return an empty tensor
     my_coordinate = mesh.get_coordinate()
-    num_chunks = mesh.size(dim=mesh_dim)
-
     if my_coordinate is None:
-        # if rank is not part of mesh, we simply return an empty tensor
         return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
-    scatter_list, pad_sizes = shard_spec._split_tensor(tensor, num_chunks, with_padding=True, contiguous=True)
+    scatter_list, pad_sizes = shard_spec._split_tensor(
+        tensor, num_chunks=mesh.size(dim=mesh_dim), with_padding=True, contiguous=True
+    )
 
     output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
     mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
@@ -180,9 +179,8 @@ def _replicate_tensor(tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int) -> 
     Replicate (broadcast) a torch.Tensor on a mesh dimension (use
     the first coordinate on the mesh dimension as source of truth)
     """
-    my_coordinate = mesh.get_coordinate()
-    if my_coordinate is None:
-        # if rank is not part of mesh, we simply return an empty tensor
+    # if rank is not part of mesh, we simply return an empty tensor
+    if mesh.get_coordinate() is None:
         return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
     tensor = tensor.contiguous()
@@ -200,14 +198,12 @@ def _reduce_scatter_to_shard_with_pad(
     """
     reduce and scatter a tensor on a mesh dimension
     """
+    # if rank is not part of mesh, we simply return tensor, which should be an empty tensor
     my_coordinate = mesh.get_coordinate()
-    num_chunks = mesh.size(dim=mesh_dim)
-
     if my_coordinate is None:
-        # if rank is not part of mesh, we simply return local_tensor,
-        # which should be an empty tensor
         return tensor
 
+    num_chunks = mesh.size(dim=mesh_dim)
     is_padded = tensor.size(shard_spec.dim) % num_chunks != 0
     if is_padded:
         scattered_list, pad_sizes = shard_spec._split_tensor(tensor, num_chunks, with_padding=True, contiguous=True)
@@ -232,6 +228,12 @@ def redistribute_local_tensor(
     the target DTensorSpec, which involves the necessary collective calls to transform
     the local shard of the DTensor from its current spec to the target spec.
     """
+    device_mesh = current_spec.mesh
+
+    # if rank is not part of mesh, we simply return local_tensor, which should be an empty tensor
+    my_coordinate = device_mesh.get_coordinate()
+    if my_coordinate is None:
+        return local_tensor
 
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
@@ -245,17 +247,7 @@ def redistribute_local_tensor(
     sorted_placements = _decompose_reshard(sorted_placements)
     sorted_placements.sort(key=_replicate_then_shard)
 
-    device_mesh = current_spec.mesh
-
     for i, (current, target) in sorted_placements:
-        my_coordinate = device_mesh.get_coordinate()
-        num_chunks = device_mesh.size(dim=i)
-
-        if my_coordinate is None:
-            # if rank is not part of mesh, we simply return local_tensor,
-            # which should be an empty tensor
-            return local_tensor
-
         if current == target:
             # short cut, just use the original local tensor
             new_local_tensor = local_tensor
@@ -323,14 +315,13 @@ def redistribute_local_tensor(
                     mesh_dim=i,
                 )
                 shards = target_placement._split_tensor(
-                    tensor=replicate_local_tensor, num_chunks=num_chunks, contiguous=False
+                    tensor=replicate_local_tensor, num_chunks=device_mesh.size(dim=i), contiguous=False
                 )
                 new_local_tensor = shards[my_coordinate[i]].clone()
-                pass
             elif current.is_replicate():
                 shards = target_placement._split_tensor(
                     tensor=local_tensor,
-                    num_chunks=num_chunks,
+                    num_chunks=device_mesh.size(dim=i),
                     contiguous=False,
                 )
                 new_local_tensor = shards[my_coordinate[i]].clone()
@@ -351,7 +342,7 @@ def redistribute_local_tensor(
                 # split the tensor and return the corresponding cloned local shard
                 shards, _ = target_placement._split_tensor(
                     local_tensor,
-                    num_chunks,
+                    num_chunks=device_mesh.size(dim=i),
                     with_padding=False,
                     contiguous=False,
                 )
@@ -366,7 +357,6 @@ def redistribute_local_tensor(
                 if shard_spec.dim != target_placement.dim:
                     # TODO: enable this with all_to_all
                     raise NotImplementedError("Changing sharding dim is not supported yet!")
-
         elif target.is_partial():
             if current.is_partial():
                 mode = _get_current_dispatch_mode()
@@ -377,7 +367,6 @@ def redistribute_local_tensor(
                     # P -> R
                     partial_spec = cast(Partial, current)
                     new_local_tensor = mesh_all_reduce(local_tensor, device_mesh, partial_spec.reduce_op, i)
-
             elif current.is_replicate():
                 # For replicate -> partial, we zero out all other ranks of the current mesh dim
                 # and leave only 1 rank have the data, to perform a "zero cost" reshard.
@@ -422,7 +411,6 @@ def redistribute_local_tensor(
                 )
                 if my_coordinate[i] != 0:
                     new_local_tensor = new_local_tensor.zero_()
-                pass
             elif current.is_shard():
                 # For sharded tensor -> partial, we reduce the tensor,
                 # then follow a same way as the second case.
@@ -458,6 +446,11 @@ class Redistribute(torch.autograd.Function):
         current_spec = input._spec
         ctx.current_spec = current_spec
         ctx.async_op = async_op
+
+        # Early return the original DTensor if the placements are the same.
+        if input._spec.placements == placements:
+            return input
+
         target_spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=input._spec.tensor_meta)
 
         local_tensor = input._local_tensor
@@ -500,9 +493,14 @@ class Redistribute(torch.autograd.Function):
             else:
                 target_placements.append(target)
         target_spec = DTensorSpec(previous_spec.mesh, tuple(target_placements), tensor_meta=previous_spec.tensor_meta)
-
         local_tensor = grad_output._local_tensor
-        output = redistribute_local_tensor(local_tensor, current_spec, target_spec, async_op)
+
+        # Short cut the local tensor if the placements are the same.
+        if current_spec == target_spec:
+            output = local_tensor
+        else:
+            output = redistribute_local_tensor(local_tensor, current_spec, target_spec, async_op)
+
         output_dtensor = dtensor.DTensor(
             output,
             target_spec.mesh,

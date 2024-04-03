@@ -25,7 +25,6 @@ from vescale.dtensor.op_schema import (
 from vescale.dtensor._diff import EnablePartialMode
 from vescale.dtensor.ops.common_rules import pointwise_rule
 from vescale.dtensor.ops.utils import (
-    generate_redistribute_costs,
     is_tensor_dim_sharded,
     is_tensor_partial,
     normalize_dim,
@@ -38,6 +37,7 @@ from vescale.dtensor.placement_types import (
     Partial,
     Placement,
     Replicate,
+    InterleavedShard,
     Shard,
     TensorMeta,
 )
@@ -52,6 +52,7 @@ aten = torch.ops.aten
         aten.clone.default,
         aten.contiguous.default,
         aten.copy_.default,
+        aten.cumsum.default,
         aten.detach.default,
         aten.equal.default,
         aten.fill_.Scalar,
@@ -323,51 +324,58 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
 
-@register_op_strategy([aten.select.int])
-def index_select(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """Only allow replication on the input/ouput"""
-    (
-        input,
-        dim,
-        _,
-    ) = op_schema.args_schema
-    dim = normalize_dim(input.output_ndim, dim)
-    input_spec: DTensorSpec = input.strategies[0].output_spec
-    has_shard_on_dim = any(placement.is_shard(dim=dim) for placement in input_spec.placements)
-    assert not has_shard_on_dim, "currently not support shard on select dim"
-    new_placements = input_spec.placements
-    for pm in new_placements:
-        if isinstance(pm, Shard) and pm.dim > dim:
-            pm.dim -= 1
-    output_spec = DTensorSpec(mesh, tuple(new_placements))
-    return OpStrategy([PlacementStrategy(output_spec)])
+@register_prop_rule(aten.select.int)
+def _prop_select(op_schema: OpSchema) -> OutputSharding:
+    tensor, dim = op_schema.args_schema[:2]
+    assert isinstance(tensor, DTensorSpec)
+    assert isinstance(dim, int)
+    placements: Sequence[Placement] = tensor.placements
+    assert all(not p.is_shard(dim) for p in placements), "DTensor does not support select on sharded dimension."
+
+    # select will remove one dimension, decrement dim of Shard placements by 1
+    # if they are larger than dim.
+    new_placements: List[Placement] = []
+    for p in placements:
+        # Using isinstance instead of is_shard so that mypy won't complain
+        # about accessing dim attribute.
+        if isinstance(p, Shard) and p.dim > dim:
+            new_placements.append(Shard(p.dim - 1))
+        else:
+            new_placements.append(p)
+
+    return OutputSharding(output_spec=DTensorSpec(mesh=tensor.mesh, placements=tuple(new_placements)))
+
+
+@register_prop_rule(aten.gather.default, schema_info=RuntimeSchemaInfo(1))
+def prop_gather(op_schema: OpSchema) -> OutputSharding:
+    values_spec, dim, indices_spec = op_schema.args_schema
+
+    assert isinstance(values_spec, DTensorSpec)
+    assert isinstance(dim, int)
+    assert isinstance(indices_spec, DTensorSpec)
+
+    return OutputSharding(
+        output_spec=DTensorSpec(
+            mesh=values_spec.mesh,
+            placements=values_spec.placements,
+        ),
+    )
 
 
 @register_op_strategy([aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src])
 def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     value, _, index, src = op_schema.args_schema
-    value_target = DTensorSpec(mesh, [Replicate()], value.strategies[0].output_spec.tensor_meta)
-    index_target = DTensorSpec(mesh, [Replicate()], index.strategies[0].output_spec.tensor_meta)
-    src_target = (
-        DTensorSpec(mesh, [Replicate()], src.strategies[0].output_spec.tensor_meta)
-        if isinstance(src, OpStrategy)
-        else src
-    )
-
-    redistribute_value_costs = []
-    # TODO: change to vescale stype redistribution
-    redistribute_value_costs.append(generate_redistribute_costs(value, value_target))
-    redistribute_index_costs = []
-    # TODO: change to vescale stype redistribution
-    redistribute_index_costs.append(generate_redistribute_costs(index, index_target))
-    redistribute_costs = [[x + y for x, y in zip(redistribute_value_costs[0], redistribute_index_costs[0])]]
     if isinstance(src, OpStrategy):
-        redistribute_src_costs = []
-        # TODO: change to vescale stype redistribution
-        redistribute_src_costs.append(generate_redistribute_costs(src, src_target))
-        redistribute_costs = [[x + y for x, y in zip(redistribute_costs[0], redistribute_src_costs[0])]]
+        src_target = src.strategies[0].output_spec
+    else:
+        src_target = src
+    value_target = value.strategies[0].output_spec
+    index_target = index.strategies[0].output_spec
 
-    output_spec = DTensorSpec(mesh=mesh, placements=[Replicate()])
+    if isinstance(src, OpStrategy):
+        output_spec = DTensorSpec(mesh=mesh, placements=src_target.placements)
+    else:
+        output_spec = DTensorSpec(mesh=mesh, placements=[Replicate()])
     input_specs = [value_target, index_target]
     if isinstance(src, OpStrategy):
         input_specs.append(src_target)
@@ -376,7 +384,6 @@ def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             PlacementStrategy(
                 output_spec=output_spec,
                 input_specs=input_specs,
-                redistribute_cost=redistribute_costs,
             )
         ]
     )
@@ -385,7 +392,7 @@ def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 @register_op_strategy([aten.index_put_.default, aten.index_put.default])
 def index_put(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """Set the Output with the index sharding"""
-    (input, index_list, value) = op_schema.args_schema
+    value = op_schema.args_schema[2]
 
     value_spec: DTensorSpec = value.strategies[0].output_spec
     output_spec = DTensorSpec(mesh, tuple(value_spec.placements))
@@ -593,7 +600,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         return result
 
 
-@register_prop_rule(aten.cat.default, schema_info=RuntimeSchemaInfo(1, needs_pytree=True))
+@register_prop_rule([aten.cat.default, aten.stack.default], schema_info=RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
     # torch.cat requires all tensors must either have the same shape (except
     # in the concatenating dimension) or be "empty". "Empty" here strictly means
@@ -637,7 +644,9 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
     need_reshard = False
     tensor_list_specs_after: List[DTensorSpec] = []
     for spec in tensor_list_specs:
-        if not is_empty(spec) and (is_tensor_dim_sharded(spec, dim=dim) or is_tensor_partial(spec)):
+        if not is_empty(spec) and (
+            is_tensor_dim_sharded(spec, dim=dim)
+        ):  # Hongyu: allow torch.cat DTensors with Partial placements
             need_reshard = True
             tensor_list_specs_after.append(
                 DTensorSpec(
@@ -780,6 +789,98 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
         for _ in range(len(output_size_list))
     ]
     return OutputSharding(output_spec_list)
+
+
+@register_prop_rule([aten.unbind.int], schema_info=RuntimeSchemaInfo(1))
+def unbind_rule(op_schema: OpSchema) -> OutputSharding:
+    output_spec_list: List[DTensorSpec] = []
+    input_spec = cast(DTensorSpec, op_schema.args_schema[0])
+    ndim = input_spec.ndim
+    dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, ndim)
+
+    # TODO: tensor to unbind cannot have Partial
+    # in its placements for now. Will need to
+    # support in future.
+    if input_spec.sums:
+        raise NotImplementedError(
+            f"splitting distributed tensor with " f"Partial placement is not implemented!\n" f"DTensorSpec={input_spec}"
+        )
+
+    # TODO: just like slice op, unbind replicates before
+    # splitting on a sharded dimension
+    need_reshard = False
+    if is_tensor_dim_sharded(input_spec, dim=dim):
+        need_reshard = True
+        input_spec = DTensorSpec(
+            mesh=input_spec.mesh,
+            placements=unshard_tensor_dim(input_spec.placements, dim=dim),
+            tensor_meta=input_spec.tensor_meta,
+        )
+
+    if need_reshard:
+        return OutputSharding(
+            None,
+            schema_suggestions=[
+                OpSchema(
+                    op=op_schema.op,
+                    args_schema=(input_spec,) + op_schema.args_schema[1:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                ),
+            ],
+        )
+
+    # we calculate output placements here.
+    output_placements = []
+    for p in input_spec.placements:
+        if p.is_shard():
+            sharded_dim = normalize_dim(p.dim, ndim)
+            if sharded_dim < dim:
+                output_placements.append(p)
+            else:
+                if isinstance(p, InterleavedShard):
+                    output_placements.append(InterleavedShard(sharded_dim - 1, p.interleaved_size))
+                else:
+                    output_placements.append(Shard(sharded_dim - 1))
+        else:
+            output_placements.append(p)
+
+    output_size_list = input_spec.shape[dim]
+    output_spec_list = [
+        DTensorSpec(
+            mesh=input_spec.mesh,
+            placements=tuple(output_placements),
+        )
+        for _ in range(output_size_list)
+    ]
+    return OutputSharding(output_spec_list)
+
+
+@register_prop_rule([aten.index_add.default, aten.index_add_.default], schema_info=RuntimeSchemaInfo(1))
+def index_add_rule(op_schema: OpSchema) -> OutputSharding:
+    input_spec = cast(DTensorSpec, op_schema.args_schema[0])
+    ndim = input_spec.ndim
+    dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, ndim)
+    index_spec = cast(DTensorSpec, op_schema.args_schema[2])
+    src_spec = cast(DTensorSpec, op_schema.args_schema[3])
+
+    if not index_spec.is_replicated():
+        raise RuntimeError("index must be replicate for index_add op")
+
+    if src_spec.sums or input_spec.sums:
+        # TODO(wjw): maybe we should allow partial here.
+        raise NotImplementedError("src and input can not be partial for index_add op")
+
+    if src_spec.ndim != input_spec.ndim:
+        raise RuntimeError("invalid index_add op detected")
+
+    assert not is_tensor_dim_sharded(input_spec, dim) and not is_tensor_dim_sharded(
+        src_spec, dim
+    ), "src or input can not be sharded on the index dim for adding"
+    for input_p, src_p in zip(input_spec.placements, src_spec.placements):
+        assert input_p == src_p, "src and input should be samley sharded on dims other than the index dim"
+    return OutputSharding(input_spec)
 
 
 @register_prop_rule(aten.alias.default)

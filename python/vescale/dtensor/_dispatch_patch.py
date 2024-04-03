@@ -40,8 +40,9 @@ def hack_for_special_op(
     kwargs: Dict[str, object],
 ):
     new_args = list(args)
+    op_name = str(op_call)
     if (
-        str(op_call) == "aten.index_put.default"
+        op_name == "aten.index_put.default"
         and not isinstance(args[2], dtensor.DTensor)
         and isinstance(args[2], torch.Tensor)
         and isinstance(args[0], dtensor.DTensor)
@@ -51,13 +52,36 @@ def hack_for_special_op(
         new_args[2] = dtensor.DTensor.from_local(new_args[2], device_mesh, sharding)
         return tuple(new_args), kwargs
     elif (
-        str(op_call) in ["aten.scatter_.value", "aten.scatter.value", "aten.scatter_.src", "aten.scatter.src"]
+        op_name in ["aten.scatter_.value", "aten.scatter.value", "aten.scatter_.src", "aten.scatter.src"]
         and not isinstance(args[0], dtensor.DTensor)
         and isinstance(args[0], torch.Tensor)
         and isinstance(args[2], dtensor.DTensor)
     ):
         device_mesh = args[2]._spec.mesh
         new_args[0] = dtensor.DTensor.from_local(new_args[0], device_mesh, [Replicate()])
+        return tuple(new_args), kwargs
+    elif (
+        str(op_call) == "aten.eq.Tensor"
+        and not isinstance(args[1], dtensor.DTensor)
+        and isinstance(args[0], dtensor.DTensor)
+        and isinstance(args[1], torch.Tensor)
+    ):
+        device_mesh = args[0]._spec.mesh
+        new_args[1] = dtensor.DTensor.from_local(new_args[1], device_mesh, [Replicate()])
+        return tuple(new_args), kwargs
+    # hack to DTensorialize the index of aten.index.Tensor op.
+    elif op_call in [aten.index.Tensor] and isinstance(args[0], dtensor.DTensor):
+        device_mesh = args[0]._spec.mesh
+        new_args = []
+        new_args.append(args[0])
+        new_args.append(
+            [
+                dtensor.DTensor.from_local(x, device_mesh, [Replicate()], run_check=False)
+                if isinstance(x, torch.Tensor) and not isinstance(x, dtensor.DTensor)
+                else x
+                for x in args[1]
+            ]
+        )
         return tuple(new_args), kwargs
     else:
         return args, kwargs

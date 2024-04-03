@@ -104,9 +104,15 @@ def unwrap_to_op_info(
                 if isinstance(a, dtensor.DTensor):
                     new_arg.append(a._local_tensor)
                     new_schema.append(a._spec)
+                    if mesh is not None:
+                        if mesh != a.device_mesh:
+                            raise NotImplementedError(f"{op_call}: DTensor does not support cross-mesh operation yet!")
+                    else:
+                        mesh = a.device_mesh
                 else:
                     new_arg.append(a)
                     new_schema.append(a)
+
             args_schema.append(new_schema)
             local_args.append(new_arg)
         else:
@@ -131,7 +137,7 @@ def unwrap_to_op_info(
             kwargs_schema[k] = v
             local_kwargs[k] = v
 
-    assert mesh is not None, "found no DeviceMesh from dtensor args for {op_call}!"
+    assert mesh is not None, f"found no DeviceMesh from dtensor args for {op_call}!"
 
     op_info = OpInfo(
         mesh,

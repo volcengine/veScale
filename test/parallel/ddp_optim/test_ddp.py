@@ -42,16 +42,16 @@ from test_models.mlp import (
 )
 
 
-def get_unfied_param_and_data(bsz, hidden_dim):
-    fc1_weight = torch.rand(hidden_dim * 4, hidden_dim).cuda()
-    fc1_bias = torch.rand(hidden_dim * 4).cuda()
-    fc2_weight = torch.rand(hidden_dim, hidden_dim * 4).cuda()
-    fc2_bias = torch.rand(hidden_dim).cuda()
+def get_unfied_param_and_data(bsz, hidden_dim, dtype=torch.float):
+    fc1_weight = torch.rand(hidden_dim * 4, hidden_dim, dtype=dtype).cuda()
+    fc1_bias = torch.rand(hidden_dim * 4, dtype=dtype).cuda()
+    fc2_weight = torch.rand(hidden_dim, hidden_dim * 4, dtype=dtype).cuda()
+    fc2_bias = torch.rand(hidden_dim, dtype=dtype).cuda()
 
-    batch1_epoch1 = torch.rand(bsz, hidden_dim).cuda()
-    batch2_epoch1 = torch.rand(bsz, hidden_dim).cuda()
-    batch1_epoch2 = torch.rand(bsz, hidden_dim).cuda()
-    batch2_epoch2 = torch.rand(bsz, hidden_dim).cuda()
+    batch1_epoch1 = torch.rand(bsz, hidden_dim, dtype=dtype).cuda()
+    batch2_epoch1 = torch.rand(bsz, hidden_dim, dtype=dtype).cuda()
+    batch1_epoch2 = torch.rand(bsz, hidden_dim, dtype=dtype).cuda()
+    batch2_epoch2 = torch.rand(bsz, hidden_dim, dtype=dtype).cuda()
 
     # allreduce parameter and batches to make sure they are same at all ranks
     torch.distributed.all_reduce(fc1_weight)

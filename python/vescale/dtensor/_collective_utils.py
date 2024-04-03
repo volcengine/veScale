@@ -63,12 +63,17 @@ def mesh_scatter(
     Returns:
         A :class:`Work` object
     """
+    # if rank is not part of mesh, simply return output
+    if mesh.get_coordinate() is None:
+        return output
+
     # TODO: Ideally we should use the meta tensor way
     # (to register a meta kernel for the collective op)
     # so that it would avoid the communication. Need to
     # remove the check below once that is done.
     if output.is_meta:
         return None
+
     dim_group = mesh.get_dim_groups(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
     # src need to be global rank
@@ -107,6 +112,10 @@ def mesh_all_to_all(
     mesh_dim: int = 0,
     async_op: bool = False,
 ) -> Optional[Work]:
+    # if rank is not part of mesh, simply return None
+    if mesh.get_coordinate() is None:
+        return None
+
     dim_group = mesh.get_dim_groups(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
 
@@ -155,12 +164,16 @@ def mesh_broadcast(
     Args:
         tensor (torch.Tensor): tensor to broadcast.
         mesh_dim (int, optional): indicate which mesh dimension we want
-            to scatter on, we by default choose the first rank on the
+            to broadcast on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
     Returns:
         A :class:`Tensor` object
     """
+    # if rank is not part of mesh, simply return tensor, which should be an empty tensor
+    if mesh.get_coordinate() is None:
+        return tensor
+
     dim_group = mesh.get_dim_groups(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
     # src need to be global rank
@@ -190,15 +203,13 @@ def mesh_reduce_scatter(
     First peform all_reduce on the tensor, then split the tensor at scatter_dim
     and scatter them to a device mesh dimension.
     """
-    my_coordinate = mesh.get_coordinate()
-    num_chunks = mesh.size(dim=mesh_dim)
-
-    if my_coordinate is None:
-        # if rank is not part of mesh, simply return local_tensor,
-        # which should be an empty tensor
+    # if rank is not part of mesh, simply return tensor, which should be an empty tensor
+    if mesh.get_coordinate() is None:
         return tensor
+
     # for now, we only support that size at `scatter_dim`` is divisable by
     # the mesh size at `mesh_dim`
+    num_chunks = mesh.size(dim=mesh_dim)
     assert (
         tensor.size(scatter_dim) % num_chunks == 0
     ), f"tensor size at {scatter_dim} is not divisable by the mesh size at {mesh_dim}"
@@ -219,20 +230,16 @@ def mesh_all_gather(
     all_gather all shards and return a tensor that is replicated
     on the previously sharded mesh dimension
     """
-    my_coordinate = mesh.get_coordinate()
-    num_chunks = mesh.size(dim=mesh_dim)
+    # if rank is not part of mesh, simply return tensor, which should be an empty tensor
+    if mesh.get_coordinate() is None:
+        return tensor
 
     # for now, we only support that global size at `scatter_dim` is equal with
     # the multuple of mesh size at `mesh_dim` and local_tensor size at `scatter_dim`
+    num_chunks = mesh.size(dim=mesh_dim)
     assert (
         tensor.size(scatter_dim) * num_chunks == global_size[scatter_dim]
     ), f"global tensor size at {scatter_dim} is not equal with the multiply of mesh size at {mesh_dim} and local_tensor size at {scatter_dim}"
-
-    if my_coordinate is None:
-        # if rank is not part of mesh, we simply return local_tensor,
-        # which should be an empty tensor
-        return tensor
-
     tensor = tensor.contiguous()
     output = funcol.all_gather_tensor(tensor, gather_dim=scatter_dim, group=mesh._dim_group_infos[mesh_dim][1])
     return output
@@ -244,6 +251,10 @@ def mesh_all_reduce(
     reduce_op: c10d.ReduceOp.RedOpType,
     mesh_dim: int,
 ) -> torch.Tensor:
+    # if rank is not part of mesh, simply return tensor, which should be an empty tensor
+    if mesh.get_coordinate() is None:
+        return tensor
+
     return funcol.all_reduce(tensor, reduceOp=reduce_op.name, group=mesh._dim_group_infos[mesh_dim][1])
 
 

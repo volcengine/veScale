@@ -34,7 +34,7 @@ class PlacementsInterface:
     async_op: bool = True  # flag for DTensor.redistribute/from_local
     defer_reshard: bool = False  # flag for deferred resharding mode
     run_check: bool = True  # flag for DTensor.from_local
-    skippable_op: bool = True  # flag for DTensor.redistribute # TODO: to enable
+    support_uneven: bool = True  # flag for DTensor.from_local
     grad: Optional[Sequence[Placement]] = None  # the placement to enforce on this tensor.grad
 
     @classmethod
@@ -43,9 +43,13 @@ class PlacementsInterface:
             return placements
         return cls(placements)
 
-    def normalize_placements(self, mesh_ndim: int) -> None:
-        self.placements = normalize_placements(self.placements, mesh_ndim)
-        self.grad = normalize_placements(self.grad, mesh_ndim)
+    def normalize_placements(self, mesh_ndim: int, *, tensor_ndim: int = 0, none_as_replicate: bool = False) -> None:
+        self.placements = normalize_placements(
+            self.placements, mesh_ndim, tensor_ndim=tensor_ndim, none_as_replicate=none_as_replicate
+        )
+        self.grad = normalize_placements(
+            self.grad, mesh_ndim, tensor_ndim=tensor_ndim, none_as_replicate=none_as_replicate
+        )
 
     def is_none(self) -> bool:
         """Is it equivalent to `None` placements;

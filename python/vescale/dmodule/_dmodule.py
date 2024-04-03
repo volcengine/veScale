@@ -254,7 +254,9 @@ class DModule:
 
         # regular intialization
         if is_sharded:
-            dt = DTensor.from_local(t, device_mesh, pi.placements, run_check=pi.run_check)
+            dt = DTensor.from_local(
+                t, device_mesh, pi.placements, run_check=pi.run_check, support_uneven=pi.support_uneven
+            )
         else:
             dt = distribute_tensor(t, device_mesh, pi.placements)
         return nn.Parameter(dt, requires_grad=param.requires_grad) if is_param else dt

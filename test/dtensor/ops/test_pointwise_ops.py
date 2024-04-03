@@ -246,6 +246,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             ),
         )
 
+    @skip("allowing partial dropout")
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
         with self.assertRaisesRegex(RuntimeError, "supported"):
@@ -273,6 +274,16 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected = torch.mul(input_tensor, other_tensor, out=output_tensor)
         self.assertEqual(input_tensor, dtensor.to_local())
         self.assertEqual(expected, dt.to_local())
+
+    def test_triu(self):
+        device_mesh = self.build_device_mesh()
+        input_size = (8, 4)
+        tensor = torch.randn(*input_size, device=self.device_type)
+        d_tensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+
+        out = torch.triu(tensor)
+        d_out = torch.triu(d_tensor)
+        self.assertEqual(d_out.to_local(), out)
 
 
 if __name__ == "__main__":

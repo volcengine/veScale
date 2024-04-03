@@ -18,10 +18,9 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 ################################################################################
 
-"""This file handles gradient allreduce for DModule
+"""This file handles gradient allreduce for DModule with no DDP
 
 NOTE:
-- If wrapped by DDP, it is called after DDP.finish_grad_sync()
 - `generate_grad_sync_list` is not recommended to be placed into a param.grad pre-hook, because:
     i) having multiple hooks on param.grad complicates the design and debugging
     ii) gradient accumlation will repeatedly fire param.grad pre-hook, degrading performance
@@ -47,21 +46,12 @@ def generate_grad_sync_list(candidate: List[Tuple[str, DTensor]]) -> List[Tuple[
     for fqn, param in candidate:
         assert param.requires_grad
         assert isinstance(param.data, DTensor)
-        if hasattr(param, "main_grad"):
-            if param.main_grad is None:
-                continue
-            grad_spec = getattr(param.main_grad, "_spec", None)
-            assert grad_spec is not None, "DDP's .main_grad must save DTensor .grad's _spec"
-            placements = grad_spec.placements
-            fqn += ".main_grad"
-            grad = param.main_grad
-        else:
-            assert hasattr(param, "grad")
-            if param.grad is None:
-                continue
-            placements = param.grad.placements
-            fqn += ".grad"
-            grad = param.grad
+        assert hasattr(param, "grad")
+        if param.grad is None:
+            continue
+        placements = param.grad.placements
+        fqn += ".grad"
+        grad = param.grad
         if any(p.is_partial() for p in placements):
             grad_sync_list.append((fqn, grad))
     return grad_sync_list
@@ -122,11 +112,8 @@ def sync_gradients(grad_sync_list: List[Tuple[str, Union[Tensor, DTensor]]], dev
     # get local tensors to allreduce + get process group to allreduce
     local_gradients = []
     partial_mesh_idxes = set()
-    for fqn, grad in grad_sync_list:
-        if fqn.endswith("main_grad"):
-            local_gradients.append(grad.data)
-        else:
-            local_gradients.append(grad._local_tensor)
+    for _, grad in grad_sync_list:
+        local_gradients.append(grad._local_tensor)
         partial_mesh_idxes.update([i for i, p in enumerate(grad._spec.placements) if p.is_partial()])
     assert len(partial_mesh_idxes) == 1, "currently, we only consider a single Partial on the same mesh dim."
     partial_pg = device_mesh.get_dim_groups(partial_mesh_idxes.pop())

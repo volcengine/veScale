@@ -40,12 +40,13 @@ class VeScaleClipGradsTest(DTensorTestBase):
     def world_size(self):
         return 4
 
-    def golden_run(self, params_and_inputs, max_norm):
+    def golden_run(self, params_and_inputs, max_norm, dtype):
         m = MLP(HIDDEN_DIM).cuda()
         m.fc1.weight = torch.nn.Parameter(params_and_inputs["fc1.weight"])
         m.fc1.bias = torch.nn.Parameter(params_and_inputs["fc1.bias"])
         m.fc2.weight = torch.nn.Parameter(params_and_inputs["fc2.weight"])
         m.fc2.bias = torch.nn.Parameter(params_and_inputs["fc2.bias"])
+        m.to(dtype)
 
         optimizer = torch.optim.Adam(m.parameters(), lr=0.01)
 
@@ -65,12 +66,13 @@ class VeScaleClipGradsTest(DTensorTestBase):
 
     @with_comms
     @parametrize("max_norm", [2.0])
-    def test_clip_grad(self, max_norm):
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    def test_clip_grad(self, max_norm, dtype):
         tp_parallel_size = 2
         dp_size = self.world_size // tp_parallel_size
         device_mesh = init_device_mesh(self.device_type, (dp_size, tp_parallel_size), mesh_dim_names=("DP", "TP"))
 
-        params_and_inputs = get_unfied_param_and_data(BSZ, HIDDEN_DIM)
+        params_and_inputs = get_unfied_param_and_data(BSZ, HIDDEN_DIM, dtype)
         new_params_and_inputs = copy.deepcopy(params_and_inputs)
         tp_sub_mesh = device_mesh["TP"]
         dp_pg = device_mesh.get_dim_groups(0)
@@ -81,6 +83,7 @@ class VeScaleClipGradsTest(DTensorTestBase):
         ve_model.fc1.bias = torch.nn.Parameter(params_and_inputs["fc1.bias"])
         ve_model.fc2.weight = torch.nn.Parameter(params_and_inputs["fc2.weight"])
         ve_model.fc2.bias = torch.nn.Parameter(params_and_inputs["fc2.bias"])
+        ve_model.to(dtype)
 
         ve_model = parallelize_module(
             ve_model, tp_sub_mesh, {"parameter": MLP_PAIRWISE_PARAM_SHARDING_PLAN, "forward": MLP_FWD_RESAHRDING_PLAM}
@@ -115,32 +118,32 @@ class VeScaleClipGradsTest(DTensorTestBase):
         # do the grad norm clipping
         ve_optimizer.clip_grad_norm(ve_optimizer.clip_grad)
 
-        golden_mlp = self.golden_run(new_params_and_inputs, max_norm=max_norm)
+        golden_mlp = self.golden_run(new_params_and_inputs, max_norm=max_norm, dtype=dtype)
         golden_fc1_weight_grad = distribute_tensor(
             golden_mlp.fc1.weight.grad.data, tp_sub_mesh, MLP_PAIRWISE_PARAM_SHARDING_PLAN["fc1.weight"]
-        )._local_tensor
+        )._local_tensor.to(dtype)
         golden_fc1_bias_grad = distribute_tensor(
             golden_mlp.fc1.bias.grad.data, tp_sub_mesh, MLP_PAIRWISE_PARAM_SHARDING_PLAN["fc1.bias"]
-        )._local_tensor
+        )._local_tensor.to(dtype)
         golden_fc2_weight_grad = distribute_tensor(
             golden_mlp.fc2.weight.grad.data, tp_sub_mesh, MLP_PAIRWISE_PARAM_SHARDING_PLAN["fc2.weight"]
-        )._local_tensor
+        )._local_tensor.to(dtype)
         golden_fc2_bias_grad = distribute_tensor(
             golden_mlp.fc2.bias.grad.data, tp_sub_mesh, MLP_PAIRWISE_PARAM_SHARDING_PLAN["fc2.bias"]
-        )._local_tensor
+        )._local_tensor.to(dtype)
 
         if self.rank in [0, 1]:
             optimizer_params = ve_optimizer.get_parameters()
-            ve_fc2_bias_grad = optimizer_params[0].grad
-            ve_fc2_weight_grad = optimizer_params[1].grad
-            ve_fc1_bias_head_2_grad = optimizer_params[2].grad
+            ve_fc2_bias_grad = optimizer_params[0].grad.to(dtype)
+            ve_fc2_weight_grad = optimizer_params[1].grad.to(dtype)
+            ve_fc1_bias_head_2_grad = optimizer_params[2].grad.to(dtype)
             torch.testing.assert_close(golden_fc2_bias_grad, ve_fc2_bias_grad)
             torch.testing.assert_close(golden_fc2_weight_grad.flatten(), ve_fc2_weight_grad)
             torch.testing.assert_close(golden_fc1_bias_grad[:2,], ve_fc1_bias_head_2_grad)
         if self.rank in [2, 3]:
             optimizer_params = ve_optimizer.get_parameters()
-            ve_fc1_bias_tail_6_grad = optimizer_params[0].grad
-            ve_fc1_weight_grad = optimizer_params[1].grad
+            ve_fc1_bias_tail_6_grad = optimizer_params[0].grad.to(dtype)
+            ve_fc1_weight_grad = optimizer_params[1].grad.to(dtype)
             torch.testing.assert_close(golden_fc1_bias_grad[2:], ve_fc1_bias_tail_6_grad)
             torch.testing.assert_close(golden_fc1_weight_grad.flatten(), ve_fc1_weight_grad)
 
