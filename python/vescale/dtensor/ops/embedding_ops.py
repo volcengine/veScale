@@ -9,10 +9,17 @@
 ################################################################################
 # implement matrix related ops for distributed tensor
 
+import copy
+
 import torch
 
 from vescale.dtensor.op_schema import OpSchema, OutputSharding
-from vescale.dtensor.ops.utils import register_prop_rule
+from vescale.dtensor.ops.utils import (
+    register_prop_rule,
+    is_tensor_all_replicate,
+    is_tensor_all_replicate_except_sharded_at_dim,
+    is_tensor_partial,
+)
 from vescale.dtensor.placement_types import DTensorSpec, Partial, Replicate, Shard
 
 aten = torch.ops.aten
@@ -65,20 +72,57 @@ def embedding_dense_backward_rules(op_schema: OpSchema) -> OutputSharding:
     grad_output, indices = op_schema.args_schema[:2]
     assert isinstance(grad_output, DTensorSpec)
     assert isinstance(indices, DTensorSpec)
-    if grad_output.placements == indices.placements:
-        # The embedding table is replicated, and input/oupput activations are
-        # sharded. In this case, gradients for the embedding table should be
-        # Partial.
-        return OutputSharding(output_spec=DTensorSpec(mesh=indices.mesh, placements=(Partial(),)))
-    elif grad_output.placements == [Partial()] and indices.placements == [Replicate()]:
-        # The embedding table is replicated and the indices is also replicated
-        # (local is a more precise term). This is postional embedding. In this
-        # case, gradients for the embmedding table should be Partial.
-        return OutputSharding(output_spec=DTensorSpec(mesh=indices.mesh, placements=(Partial(),)))
-    elif all(placement.is_replicate() for placement in indices.placements):
-        # BWD for colwise sharding case
-        return OutputSharding(output_spec=DTensorSpec(mesh=indices.mesh, placements=(Shard(1),)))
-    else:
-        raise NotImplementedError(
-            "Unsupported embedding dense backward schema:\n" f"grad_output - {grad_output}\n" f"indices - {indices}"
-        )
+
+    mesh = grad_output.mesh
+
+    # Situation 1: All replicate
+    if is_tensor_all_replicate(grad_output) and is_tensor_all_replicate(indices):
+        return OutputSharding(output_spec=DTensorSpec(mesh=mesh, placements=tuple([Replicate()] * mesh.ndim)))
+
+    # Situation 2: Colwise sharding
+    if is_tensor_all_replicate_except_sharded_at_dim(
+        spec=grad_output, tensor_dim=grad_output.ndim - 1
+    ) and is_tensor_all_replicate(indices):
+        result_placements = []
+        for p in grad_output.placements:
+            if p.is_shard():
+                tmp_p = copy.deepcopy(p)
+                tmp_p.dim = 1
+                result_placements.append(tmp_p)
+            else:
+                result_placements.append(p)
+        return OutputSharding(output_spec=DTensorSpec(mesh=mesh, placements=tuple(result_placements)))
+
+    # Situation 3: Sharded on dims other than hidden dim
+    sharded_on_no_hidden_flag = False
+    sharded_on_no_hidden_mesh_dims = []
+    for mesh_idx, idx_p in enumerate(indices.placements):
+        grad_out_p = grad_output.placements[mesh_idx]
+        if idx_p.is_partial() or grad_out_p.is_partial():
+            sharded_on_no_hidden_flag = False
+            break
+        if idx_p.is_replicate() or grad_out_p.is_replicate():
+            continue
+        if idx_p != grad_out_p:
+            sharded_on_no_hidden_flag = False
+            break
+        sharded_on_no_hidden_flag = True
+        sharded_on_no_hidden_mesh_dims.append(mesh_idx)
+
+    if sharded_on_no_hidden_flag:
+        result_placements = [Replicate()] * mesh.ndim
+        for mesh_idx in sharded_on_no_hidden_mesh_dims:
+            result_placements[mesh_idx] = Partial()
+        return OutputSharding(output_spec=DTensorSpec(mesh=mesh, placements=tuple(result_placements)))
+
+    # Situation 4: grad_output is partial, but indices is replicate
+    if (
+        is_tensor_all_replicate(indices)
+        and is_tensor_partial(grad_output)
+        and not any(p.is_shard() for p in grad_output.placements)
+    ):
+        return OutputSharding(output_spec=grad_output)
+
+    raise NotImplementedError(
+        "Unsupported embedding dense backward schema:\n" f"grad_output - {grad_output}\n" f"indices - {indices}"
+    )

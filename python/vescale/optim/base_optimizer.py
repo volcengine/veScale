@@ -156,7 +156,7 @@ class BasicOptimizer(OptimizerBase):
         self,
         optimizer,
         models: Union[torch.nn.Module, List[torch.nn.Module]],
-        grad_hook: Optional[GradOptimizerHookBase] = BasicOptimizerHook(),
+        grad_hook: Optional[GradOptimizerHookBase] = BasicOptimizerHook,
     ) -> None:
         super().__init__(optimizer=optimizer)
         self.models = models
@@ -175,17 +175,22 @@ class BasicOptimizer(OptimizerBase):
         from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 
         for m in self.models:
-            if not DModule.is_dmodule(m):
-                logging.warning("module has no `finish_grad_sync` method defined, skip allreducing grads")
-                continue
             # if module is wrapped by DDP, we needn't handle partial grad sync. DDP will do it.
             if isinstance(m, DDP):
+                continue
+            if not DModule.is_dmodule(m):
+                logging.warning("module has no `finish_grad_sync` method defined, skip allreducing grads")
                 continue
             m.finish_grad_sync()
         return self.optimizer.step(closure)
 
     def zero_grad(self, set_to_none: bool = True) -> None:
+        from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
+
         self.optimizer.zero_grad(set_to_none=set_to_none)
+        for m in self.models:
+            if isinstance(m, DDP):
+                m.zero_grad_buffer(zero_buffer=True)
 
     def state_dict(self):
         return self.optimizer.state_dict()

@@ -6,12 +6,14 @@
 
 import math
 import warnings
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Sequence
 
 import torch
 import torch.distributed as dist
 
 from vescale.dtensor.dtensor import DTensor
+from vescale.dtensor.device_mesh import DeviceMesh
+from vescale.dtensor.placement_types import Placement
 
 
 def get_param_nelements(param: Union[torch.nn.Parameter, torch.Tensor]) -> int:
@@ -75,7 +77,9 @@ class Bucket:
         """
         self.params_with_grad = set()
         self.communication_handle = None
+        self.partial_grad_communication_handle = None
         self.communication_issued = False
+        self.partial_grad_communication_issued = False
 
     def shard_buffer(self, buffer: torch.Tensor):
         """
@@ -88,6 +92,23 @@ class Bucket:
         ]
         return sharded_buffer
 
+    def all_reduce_partial_grad(
+        self, partial_main_grad, model_parallel_device_mesh: DeviceMesh, placements: Sequence[Placement]
+    ):
+        # wait for the last partial grad all-reduce finish
+        if self.partial_grad_communication_handle is not None and self.partial_grad_communication_issued:
+            self.partial_grad_communication_handle.wait()
+
+        # TODO: there may be other invalid cases, we should add more checks here.
+        partial_mesh_idxes = [i for i, p in enumerate(placements) if p.is_partial()]
+        assert len(partial_mesh_idxes) == 1, "currently, we only consider a single Partial on the same mesh dim."
+        model_parallel_pg = model_parallel_device_mesh.get_dim_groups(partial_mesh_idxes[0])
+
+        self.partial_grad_communication_handle = dist.all_reduce(
+            partial_main_grad, group=model_parallel_pg, async_op=True
+        )
+        self.partial_grad_communication_issued = True
+
     def start_grad_sync(self):
         """
         Initiates grad sync (all-reduce or reduce-scatter) communication operation
@@ -97,6 +118,11 @@ class Bucket:
         communication call. When overlap_grad_reduce is set to False, makes
         synchronous call.
         """
+
+        # We must wait until all partial grad in this bucket is all-reduced.
+        if self.partial_grad_communication_handle is not None and self.partial_grad_communication_issued:
+            self.partial_grad_communication_handle.wait()
+
         assert (
             self.communication_handle is None and not self.communication_issued
         ), "Should not have multiple communication calls in flight at once"
@@ -163,6 +189,19 @@ class Bucket:
         # If all params in bucket have grads available, issue communication call.
         if len(self.params_with_grad) == len(self.params):
             self.start_grad_sync()
+
+    def register_partial_grad_ready(
+        self,
+        param: torch.nn.Parameter,
+        model_parallel_device_mesh: DeviceMesh,
+        placements: Sequence[Placement],
+    ):
+        """
+        Immediately trigger partial gradient all-reduce in an async way.
+        """
+        assert param in self.params, "Param is not in the bucket"
+        assert any(p.is_partial() for p in placements), "Param's grad should be partial sharded"
+        self.all_reduce_partial_grad(param.main_grad, model_parallel_device_mesh, placements)
 
 
 class GradBuffer:
@@ -411,3 +450,15 @@ class GradBuffer:
         if self.is_last_microbatch:
             bucket = self.param_to_bucket[param]
             bucket.register_grad_ready(param)
+
+    def register_partial_grad_ready(
+        self,
+        param: torch.nn.Parameter,
+        model_parallel_device_mesh: DeviceMesh,
+        placements: Sequence[Placement],
+    ):
+        """
+        Immediately trigger partial gradient all-reduce in an async way.
+        """
+        bucket = self.param_to_bucket[param]
+        bucket.register_partial_grad_ready(param, model_parallel_device_mesh, placements)

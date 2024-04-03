@@ -113,7 +113,9 @@ def materialize_dtensor(
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device = device_mesh.device_type
     # get placements
-    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, none_as_replicate=True)
+    placements: Tuple[Placement] = normalize_placements(
+        placements, device_mesh.ndim, tensor_ndim=tensor.ndim, none_as_replicate=True
+    )
     # get local tensor shape
     local_shape = compute_local_shape(global_shape, device_mesh, placements)
     torch_device = torch.device(device)
@@ -171,7 +173,9 @@ def materialize_dparameter(
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device = device_mesh.device_type
     # get placements
-    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, none_as_replicate=True)
+    placements: Tuple[Placement] = normalize_placements(
+        placements, device_mesh.ndim, tensor_ndim=param.data.ndim, none_as_replicate=True
+    )
     # get local tensor shape
     local_shape = compute_local_shape(global_shape, device_mesh, placements)
     torch_device = torch.device(device)

@@ -7,7 +7,9 @@
 """Megatron distributed optimizer."""
 
 import math
-from typing import Dict, Sequence, Any
+import inspect
+from dataclasses import dataclass
+from typing import Dict, Sequence, Tuple, Optional, Any
 
 import torch
 import torch.distributed as dist
@@ -43,6 +45,87 @@ class Range:
 
     def __repr__(self) -> str:
         return "Range(%d,%d [%d])" % (self.start, self.end, self.size)
+
+
+@dataclass
+class OptimizerStateSpec:
+    """This class represents mapping between local flattened 1D tensor
+    and global original DTensor in DOptimzier, it is used for
+    loading or saving optimizer states using OmniStore (PyTorch DCP)
+    and load-time checkpoint resharding when changing tp size or dp size.
+
+    For example, a linear layer in Vescale is DTensor(size=[1024, 1024])
+    It first divides into two parts along dim=0 with tensor parallel size = 2
+
+    tensor_part_0 = DTensor(size=[512, 1024])
+    tensor_part_1 = DTensor(size=[512, 1024])
+
+    Then each part's optimizer states are initalized in DOptimizer sepearately
+
+    Assume dp=2
+    For process with dp=0 tp=0, the flatten tensor is torch.Tensor(size=[262144])
+    global_shape=(1024, 1024), local_shape=(256, 1024), global_offset=(0, 0) local=torch.Tensor(size=[262144]).view(local_shape)
+
+    For process with dp=1 tp=0, the flatten tensor is torch.Tensor(size=[262144])
+    global_shape=(1024, 1024), local_shape=(256, 1024), global_offset=(256, 0) local=torch.Tensor(size=[262144]).view(local_shape)
+
+    For process with dp=0 tp=1, the flatten tensor is torch.Tensor(size=[262144])
+    mapping to [512:768, 0:1024] in original DTensor
+    global_shape=(1024, 1024), local_shape=(256, 1024), global_offset=(512, 0) local=torch.Tensor(size=[262144]).view(local_shape)
+
+    For process with dp=1 tp=1, the flatten tensor is torch.Tensor(size=[262144])
+    global_shape=(1024, 1024), local_shape=(256, 1024), global_offset=(768, 0) local=torch.Tensor(size=[262144]).view(local_shape)
+    """
+
+    # The original DTensor shape
+    global_shape: Tuple[int]
+    # The local tensor shape ***before flattened into 1D tensor***
+    local_shape: Tuple[int]
+    # The local tensor's offset with respect to origianl DTensor
+    global_offset: Tuple[int]
+    # The unflattened local tensor after create view using local_shape on the flattened 1D Tensor in DOptimizer
+    # NOTE: In order to support TP resharding and state cross dp ranks, we defer the reshaping from 1D to local_shape
+    # to generate saving plan using OmniStore (PyTorch DCP)
+    local_tensor: torch.Tensor
+    # If the current optimizer state is sharded by multiple dp ranks,
+    # we should record all ranks and their ranges
+    dp_ranks_ranges: Optional[Dict[int, Range]]
+
+
+def convert_dict_with_sharded(
+    param_state: dict,
+    global_shape: Tuple[int],
+    local_shape: Tuple[int],
+    global_offset: Tuple[int],
+    dp_ranks_ranges: Optional[Dict[int, Range]],
+):
+    new_param_state = {}
+    for k, v in param_state.items():
+        if isinstance(v, torch.Tensor) and v.dim() >= 1:
+            # Don't unflatten tensor here, see the comments above
+            if not dp_ranks_ranges:
+                if math.prod(local_shape) != math.prod(v.shape):
+                    print(f"rank={dist.get_rank()} name={k} global shape={global_shape}\
+                    local_shape={local_shape} global_offset={global_offset} real shape={v.shape}")
+                    raise AssertionError()
+            new_param_state[k] = OptimizerStateSpec(
+                global_shape, local_shape, global_offset, v, dp_ranks_ranges
+            )  # , process_group)
+        else:
+            new_param_state[k] = v
+    return new_param_state
+
+
+def convert_dict_sharded_to_tensor(param_state: dict, range_1d: Optional[Range]):
+    for k, v in param_state.items():
+        if isinstance(v, OptimizerStateSpec):
+            # If the state is distributed on multiple dp ranks
+            # Get my parts
+            if range_1d:
+                param_state[k] = v.local_tensor.flatten()[range_1d.start : range_1d.end]
+            else:
+                param_state[k] = v.local_tensor.flatten()
+    return param_state
 
 
 class DistributedOptimizer(OptimizerBase):
@@ -292,6 +375,22 @@ class DistributedOptimizer(OptimizerBase):
         self.optimizer.param_groups = [g["orig_group"] for g in self.opt_group_ranges]
         self.optimizer.load_state_dict(self.optimizer.state_dict())
 
+    def build_param_sharding_info_for_checkpoint(self, model: DDP, dtype, gbuf_world_all_ranges):
+        param_world_index_map = model.grad_buffer_param_index_map[dtype]
+        for param, param_world_indexes in param_world_index_map.items():
+            if param not in self.param_shard_info:
+                self.param_shard_info[param] = []
+            for gbuf_world_range in gbuf_world_all_ranges:
+                param_world_start, param_world_end, _ = param_world_indexes
+                param_local_start = max(0, param_world_start - gbuf_world_range.start)
+                param_local_end = min(gbuf_world_range.size, param_world_end - gbuf_world_range.start)
+
+                # Add param, if within local gbuf range.
+                if param_local_end > param_local_start:
+                    self.param_shard_info[param].append(param_local_end - param_local_start)
+                else:
+                    self.param_shard_info[param].append(0)
+
     def build_model_gbuf_param_range_map(self, model: DDP, dtype, gbuf_world_range, bucket_offset):
         """
         Build mapping from param reference to grad buffer shard ranges.
@@ -381,6 +480,9 @@ class DistributedOptimizer(OptimizerBase):
 
         # Local DP's ranges.
         gbuf_world_range = gbuf_world_all_ranges[data_parallel_rank]
+
+        # Get parameter sharding info of all ranks, for checkpointing.
+        self.build_param_sharding_info_for_checkpoint(model, dtype, gbuf_world_all_ranges)
 
         # Get each param's ranges.
         param_range_map = self.build_model_gbuf_param_range_map(model, dtype, gbuf_world_range, bucket.offset)
@@ -553,6 +655,10 @@ class DistributedOptimizer(OptimizerBase):
                         shard_model_param.shared = model_param.shared
                         shard_main_param.shared = model_param.shared
 
+                    # copy sharded info from DTensor
+                    shard_model_param._spec = None if not isinstance(model_param, DTensor) else model_param._spec
+                    shard_main_param._spec = None if not isinstance(model_param, DTensor) else model_param._spec
+
                     # Add to group.
                     model_float16_params_this_group.append(model_param)
                     shard_float16_params_this_group.append(shard_model_param)
@@ -615,99 +721,129 @@ class DistributedOptimizer(OptimizerBase):
         optimizer state (e.g., exp_avg, exp_avg_sq) are stored in a separate
         checkpoint file by calling 'save_parameter_state()'.
         """
+        # all gather ddp module
+        if self.overlap_param_gather:
+            for m in self.models:
+                self._param_all_gather(m)
+            # we disable all pre_forward hook needed for param sync, and reenable them
+            # at the end of subsequent forward.
+            self._disable_pre_hook()
 
-        state_dict = {}
+        optimizer_state = self.optimizer.state_dict()
 
-        # Optimizer state (do not store parameter state here).
-        state_dict["optimizer"] = {k: v for k, v in self.optimizer.state_dict().items() if k != "state"}
-        for param_group in state_dict["optimizer"]["param_groups"]:
-            del param_group["params"]
+        distributed_state = {
+            "param_group_meta": optimizer_state["param_groups"],
+        }
+        self.prefix_sum_param_groups = []
+        param_groups = self.optimizer.state_dict()["param_groups"]
 
-        return state_dict
+        for i, _ in enumerate(param_groups):
+            if i == 0:
+                self.prefix_sum_param_groups.append(0)
+            else:
+                self.prefix_sum_param_groups.append(
+                    len(param_groups[i - 1]["params"]) + self.prefix_sum_param_groups[i - 1]
+                )
+        for i, model in enumerate(self.models):
+            # key is name,
+            # value is dtype
+            param_dtype = {}
+            for dtype, param_maps in self.model_gbuf_ranges[i].items():
+                if dtype not in distributed_state:
+                    distributed_state[dtype] = {}
+                for param_map in param_maps:
+                    for param in param_map["param_map"].keys():
+                        param_dtype[param] = dtype
+
+            for param in model.parameters():
+                if param in param_dtype.keys():
+                    dtype = param_dtype[param]
+                    param_key = self.param_to_name[param]
+                    group_id, local_id_in_group = self.model_param_group_index_map[param]
+                    distributed_state[dtype][param_key] = convert_dict_with_sharded(
+                        optimizer_state["state"][self.prefix_sum_param_groups[group_id] + local_id_in_group],
+                        self.param_global_shape_info[param],
+                        self.param_local_shape_info[param],
+                        self.param_global_offset_info[param],
+                        self.param_across_dp_ranks_info.get(param),
+                    )
+        # If it is mix percision training, we should save master fp32 weights
+        if not all(not group for group in self.shard_fp32_from_float16_groups):
+            for group in self.shard_fp32_from_float16_groups:
+                for param in group:
+                    original_param = self.param_to_origin_param_for_shard_fp32_from_float16_groups[param]
+                    name = self.param_to_name[original_param]
+                    distributed_state[torch.float32][name]["shard_fp32_from_float16_groups"] = OptimizerStateSpec(
+                        self.param_global_shape_info[original_param],
+                        self.param_local_shape_info[original_param],
+                        self.param_global_offset_info[original_param],
+                        param,
+                        self.param_across_dp_ranks_info.get(original_param),
+                    )
+
+        return distributed_state
 
     def load_state_dict(self, state_dict):
-        """Load the state dict.
-
-        As detailed in state_dict(), the state dict contains all non-
-        parameter-related variables. This method is notably longer than
-        state_dict(), because the Torch optimizers state has yet to be
-        allocated at this point, and so we must do a cross referencing between
-        the optimizers state (and the ordering it expects for parameter state)
-        and this DP rank's shards. The optimizer at this point does not contain
-        any tensor dimension information, so we must get these dimensions from
-        the DP shards mapped during DistributedOptimizer.__init__().
-
-        The tensor parameter state is loaded via load_parameter_state(), and
-        so this method also must populate the loaded state dict with dummy
-        tensor data (i.e., via torch.empty() below). This will be overwritten
-        during load_parameter_state().
-
-        ** Note: Torch optimizer's state structure. **
-        The Torch optimizer stores its state in two levels. The top level is a
-        list of groups, where each group contains a list of integer indexes
-        (corresponding to parameters) that index into a master parameter list
-        that is shared by all groups. As such, three values are necessary for
-        maintaining this ordering:
-
-        - group_index : The group to which a parameter belongs.
-        - group_order : The index of a parameter within its group.
-        - state_order : The index of a parameter within the shared parameter
-            list.
         """
+        Load the state dict.
+        """
+        optimizer_state = {"param_groups": state_dict["param_group_meta"]}
+        original_optimizer_state = self.optimizer.state_dict()
+        # update params
+        for i, param_group in enumerate(optimizer_state["param_groups"]):
+            # Just assign param indices, assign param directly leading to deepcopy error
+            if len(param_group["params"]) != len(original_optimizer_state["param_groups"][i]["params"]):
+                param_group["params"] = original_optimizer_state["param_groups"][i]["params"]
+        # resume optimizer state:
+        optimizer_state["state"] = {}
+        param_index = 0
 
-        # Get the Torch optimizer's state dict.
-        # - This 'inner' optimizer at this point is unallocated, and only
-        #   contains an integer odering of parameters within each group, and
-        #   the ordering of parameters within its flattened parameter state
-        #   list.
-        inner_state_dict = self.optimizer.state_dict()
-        state_dict_param_groups = [
-            {
-                **group,
-                "params": list(inner_state_dict["param_groups"][idx]["params"]),
-            }
-            for idx, group in enumerate(state_dict["optimizer"]["param_groups"])
-        ]
+        for i, model in enumerate(self.models):
+            param_dtype = {}
+            for dtype, param_maps in self.model_gbuf_ranges[i].items():
+                for param_map in param_maps:
+                    for param in param_map["param_map"].keys():
+                        param_dtype[param] = dtype
+            param_list = []
+            for param in model.parameters():
+                if param in param_dtype.keys():
+                    dtype = param_dtype[param]
+                    ranges = self.param_across_dp_ranks_info.get(param)
+                    name = self.param_to_name[param]
+                    param_list.append((param, dtype, ranges, name))
 
-        # Allocate 'dummy' data for optimizer state (i.e., torch.empty() below)
-        # - Real data is overwritten during load_parameter_state().
-        state_dict_state = []
-        for gbuf_range_maps in self.model_gbuf_ranges:
-            for gbuf_range_map_for_all_buckets in gbuf_range_maps.values():
-                for gbuf_range_map in gbuf_range_map_for_all_buckets:
-                    for model_param, param_range_map in gbuf_range_map["param_map"].items():
-                        # Get parameter ordering information (see method docstring
-                        # for details).
-                        group_index, group_order = self.model_param_group_index_map[model_param]
-                        state_order = inner_state_dict["param_groups"][group_index]["params"][group_order]
+            for param_info in param_list:
+                if param_info[2]:
+                    my_range = param_info[2][self.current_global_rank]
+                else:
+                    my_range = None
+                group_id, local_id_in_group = self.model_param_group_index_map[param_info[0]]
+                optimizer_state["state"][self.prefix_sum_param_groups[group_id] + local_id_in_group] = (
+                    convert_dict_sharded_to_tensor(state_dict[param_info[1]][param_info[3]], my_range)
+                )
+                param_index += 1
 
-                        # Allocate dummy tensors.
-                        numel = len(param_range_map["gbuf_world"])
-                        init_shard = lambda: torch.empty(
-                            (numel,), dtype=torch.float32, device=torch.cuda.current_device()
-                        )
+        self.optimizer.load_state_dict(optimizer_state)
 
-                        state_dict_state.append(
-                            (
-                                state_order,
-                                {
-                                    "exp_avg": init_shard(),
-                                    "exp_avg_sq": init_shard(),
-                                },
-                            )
-                        )
-
-        # Sort by state order (see method docstring for details).
-        state_dict_state.sort(key=lambda s: s[0])
-        state_dict_state = {s[0]: s[1] for s in state_dict_state}
-
-        # Optimizer.
-        self.optimizer.load_state_dict(
-            {
-                "state": state_dict_state,
-                "param_groups": state_dict_param_groups,
-            }
-        )
+        if not all(not group for group in self.shard_fp32_from_float16_groups):
+            for group in self.shard_fp32_from_float16_groups:
+                for param in group:
+                    original_param = self.param_to_origin_param_for_shard_fp32_from_float16_groups[param]
+                    name = self.param_to_name[original_param]
+                    # The weights have been flatten into 1D and get range based on current rank (if necessary)
+                    # in the "resume optimizer state loop
+                    param.copy_(state_dict[torch.float32][name]["shard_fp32_from_float16_groups"])
+        # state_dict['shard_fp32_from_float16_groups']
+        # optimizer_state['shard_fp32_from_float16_groups']
+        # TODO: Copy data for the main params.
+        # for current_group, saved_group in zip(
+        #         self.shard_fp32_from_float16_groups,
+        #         state_dict["shard_fp32_from_float16_groups"]):
+        #     for current_param, saved_param in zip(current_group, saved_group):
+        #         if isinstance(current_param.data, DTensor):
+        #             current_param.data._local_tensor.copy_(saved_param.data)
+        #         else:
+        #             current_param.data.copy_(saved_param.data)
 
     def zero_grad(self, set_to_none=True):
         """
@@ -1107,3 +1243,13 @@ class DistributedOptimizer(OptimizerBase):
                 grads_for_norm.append(grad._local_tensor if isinstance(grad, DTensor) else grad)
 
         return grads_for_norm
+
+
+def initialize_optimizer_state(optimizer: DistributedOptimizer):
+    optimizer._copy_model_grads_to_main_grads()
+    orig_optimizer = optimizer.optimizer
+    for group in orig_optimizer.param_groups:
+        param_list = inspect.signature(orig_optimizer._init_group).parameters
+        num_params = len(param_list)
+        args = [group] + [[] for i in range(num_params - 1)]
+        orig_optimizer._init_group(*args)

@@ -561,39 +561,20 @@ def propagate_shape_and_sharding(
     return (tuple(out_shape), output_placements, shardable_dims)
 
 
-def register_prop_rule_map(
-    aten_op_overload: torch._ops.OpOverload,
-    local_op_name: Callable[..., torch.Tensor],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> None:
-    spec: Op = ops[local_op_name]
+def _reshape_prop(op_schema: OpSchema, spec: Op) -> OutputSharding:
+    rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
+    input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
+    mesh = input_dtensor_spec.mesh
 
-    @register_prop_rule(aten_op_overload, schema_info=schema_info)
-    def reshape_prop(op_schema: OpSchema) -> OutputSharding:
-        rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-        input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
-        mesh = input_dtensor_spec.mesh
+    assert isinstance(input_dtensor_spec, DTensorSpec), "Expected first input to be a DTensorSpec"
+    global_in_shape = input_dtensor_spec.shape
+    assert global_in_shape is not None, "Shape required."
 
-        assert isinstance(input_dtensor_spec, DTensorSpec), "Expected first input to be a DTensorSpec"
-        global_in_shape = input_dtensor_spec.shape
-        assert global_in_shape is not None, "Shape required."
+    if TORCH_VERSION_BIGGER_THAN_2_2:
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        if TORCH_VERSION_BIGGER_THAN_2_2:
-            from torch._subclasses.fake_tensor import unset_fake_temporarily
-            from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
-
-            with disable_proxy_modes_tracing(), unset_fake_temporarily():
-                (
-                    global_out_shape,
-                    shard_out,
-                    shardable_dims,
-                ) = propagate_shape_and_sharding(
-                    input_dtensor_spec.placements,
-                    tuple(global_in_shape),
-                    rules,
-                    mesh.shape,
-                )
-        else:
+        with disable_proxy_modes_tracing(), unset_fake_temporarily():
             (
                 global_out_shape,
                 shard_out,
@@ -604,60 +585,83 @@ def register_prop_rule_map(
                 rules,
                 mesh.shape,
             )
+    else:
+        (
+            global_out_shape,
+            shard_out,
+            shardable_dims,
+        ) = propagate_shape_and_sharding(
+            input_dtensor_spec.placements,
+            tuple(global_in_shape),
+            rules,
+            mesh.shape,
+        )
 
-        if shard_out is not None:
-            # no reshard needed
-            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
+    if shard_out is not None:
+        # no reshard needed
+        output_dtensor_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
 
-            # We only need the local shape to lower the call into the local op
-            args = op_schema.args_schema
-            shape_argnum = spec.shape_argnum
-            if shape_argnum is not None:
-                # compute the local shape from the global shape, then return
-                # a resharding even if we don't really reshard, the only reason
-                # for this type of resharding is to lower the global shape to
-                # local shape
-                local_out_shape = compute_local_shape(list(global_out_shape), mesh, shard_out)
+        # We only need the local shape to lower the call into the local op
+        args = op_schema.args_schema
+        shape_argnum = spec.shape_argnum
+        if shape_argnum is not None:
+            # compute the local shape from the global shape, then return
+            # a resharding even if we don't really reshard, the only reason
+            # for this type of resharding is to lower the global shape to
+            # local shape
+            local_out_shape = compute_local_shape(list(global_out_shape), mesh, shard_out)
 
-                suggested_schema = OpSchema(
+            suggested_schema = OpSchema(
+                op=op_schema.op,
+                args_schema=args[:shape_argnum] + (tuple(local_out_shape),) + args[shape_argnum + 1 :],
+                kwargs_schema=op_schema.kwargs_schema,
+            )
+            return OutputSharding(
+                output_spec=output_dtensor_spec,
+                schema_suggestions=[suggested_schema],
+                needs_redistribute=True,
+            )
+
+        return OutputSharding(output_spec=output_dtensor_spec)
+
+    else:
+        # TODO: optimize this. we shouldn't simply blindly replicate
+        #       unshardable dims ...
+        # FIXME: this can be wrong for situations where we have
+        #        [Shard(0), Shard(0)]
+        suggested_placements = [
+            p if not isinstance(p, (Shard, InterleavedShard)) or shardable_dims[p.dim][mesh_dim] else Replicate()
+            for mesh_dim, p in enumerate(input_dtensor_spec.placements)
+        ]
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
                     op=op_schema.op,
-                    args_schema=args[:shape_argnum] + (tuple(local_out_shape),) + args[shape_argnum + 1 :],
+                    args_schema=(
+                        DTensorSpec(
+                            placements=tuple(suggested_placements),
+                            mesh=input_dtensor_spec.mesh,
+                            tensor_meta=input_dtensor_spec.tensor_meta,
+                        ),
+                    )
+                    + op_schema.args_schema[1:],
                     kwargs_schema=op_schema.kwargs_schema,
                 )
-                return OutputSharding(
-                    output_spec=output_dtensor_spec,
-                    schema_suggestions=[suggested_schema],
-                    needs_redistribute=True,
-                )
+            ],
+        )
 
-            return OutputSharding(output_spec=output_dtensor_spec)
 
-        else:
-            # TODO: optimize this. we shouldn't simply blindly replicate
-            #       unshardable dims ...
-            # FIXME: this can be wrong for situations where we have
-            #        [Shard(0), Shard(0)]
-            suggested_placements = [
-                p if not isinstance(p, (Shard, InterleavedShard)) or shardable_dims[p.dim][mesh_dim] else Replicate()
-                for mesh_dim, p in enumerate(input_dtensor_spec.placements)
-            ]
-            return OutputSharding(
-                output_spec=None,
-                schema_suggestions=[
-                    OpSchema(
-                        op=op_schema.op,
-                        args_schema=(
-                            DTensorSpec(
-                                placements=tuple(suggested_placements),
-                                mesh=input_dtensor_spec.mesh,
-                                tensor_meta=input_dtensor_spec.tensor_meta,
-                            ),
-                        )
-                        + op_schema.args_schema[1:],
-                        kwargs_schema=op_schema.kwargs_schema,
-                    )
-                ],
-            )
+def register_prop_rule_map(
+    aten_op_overload: torch._ops.OpOverload,
+    local_op_name: Callable[..., torch.Tensor],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> None:
+    spec: Op = ops[local_op_name]
+
+    @register_prop_rule(aten_op_overload, schema_info=schema_info)
+    def reshape_prop(op_schema: OpSchema) -> OutputSharding:
+        return _reshape_prop(op_schema, spec)
 
 
 register_prop_rule_map(aten.squeeze.default, torch.squeeze)
@@ -667,3 +671,17 @@ register_prop_rule_map(aten.expand.default, Tensor.expand, schema_info=RuntimeSc
 register_prop_rule_map(aten.permute.default, torch.permute, schema_info=RuntimeSchemaInfo(1))
 register_prop_rule_map(aten.repeat.default, Tensor.repeat, schema_info=RuntimeSchemaInfo(1))
 register_prop_rule_map(aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1))
+
+
+@register_prop_rule([aten.expand_as.default])
+def expand_as_prop(op_schema: OpSchema) -> OutputSharding:
+    source, dst = op_schema.args_schema
+    global_out_shape = dst.tensor_meta.shape
+    new_op_schema = OpSchema(
+        op=aten.expand.default, args_schema=(source, tuple(global_out_shape)), kwargs_schema=op_schema.kwargs_schema
+    )
+    expand_sharding_out = _reshape_prop(new_op_schema, ops[Tensor.expand])
+    expand_sharding_out.output_spec.placements = dst.placements
+    expand_sharding_out.needs_redistribute = False
+    expand_sharding_out.suggested_schema = None
+    return expand_sharding_out

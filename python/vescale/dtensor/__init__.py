@@ -54,7 +54,9 @@ def _dtensor_init_helper(
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device = device_mesh.device_type
     # get placements
-    placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, none_as_replicate=True)
+    placements: Tuple[Placement] = normalize_placements(
+        placements, device_mesh.ndim, tensor_ndim=len(global_shape), none_as_replicate=True
+    )
     # get local tensor shape
     local_shape = compute_local_shape(global_shape, device_mesh, placements)
     # initialize the local tensor

@@ -9,7 +9,7 @@
 ################################################################################
 
 import warnings
-from typing import List, Sequence, Tuple, Optional, Dict, Set
+from typing import List, Sequence, Tuple, Optional, Dict, Set, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -131,14 +131,19 @@ def is_same_shape_across_ranks(tensor_shape: ShapeType, device_mesh: DeviceMesh,
 
 
 def gather_local_tensor_shape(
-    self_local_tensor: torch.Tensor, device_mesh: DeviceMesh, placements: Sequence[Placement], shard_only: bool = True
+    self_local_tensor: Union[torch.Tensor, torch.Size],
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    shard_only: bool = False,
 ) -> Optional[Dict[int, List[List[int]]]]:
     """All gather local tensor shapes per mesh dimension.
-    When `shard_only is True`, all gather only sharded mesh dim."""
+    When `shard_only is True`, all gather only sharded mesh dim. Otherwise, all gather all mesh dims."""
     if device_mesh.get_coordinate() is None:  # if rank is not part of mesh
         return None
 
-    self_local_shape = torch.tensor([list(self_local_tensor.shape)], dtype=torch.int64, device=device_mesh.device_type)
+    _shape: torch.Size = self_local_tensor if isinstance(self_local_tensor, torch.Size) else self_local_tensor.shape
+    self_local_shape = torch.tensor([list(_shape)], dtype=torch.int64, device="cpu", pin_memory=True)
+    self_local_shape = self_local_shape.to(device_mesh.device_type, non_blocking=True)
     meshdim_localtensor_shape = {}
     for mesh_dim, place in enumerate(placements):
         if shard_only and not isinstance(place, (Shard, InterleavedShard)):
@@ -153,7 +158,9 @@ def gather_local_tensor_shape(
         if type(stacked_local_shape) is funcol.AsyncCollectiveTensor:
             # synchronously wait for any pending collectives to get the result tensor
             stacked_local_shape = stacked_local_shape.trigger_wait()
-            stacked_local_shape = stacked_local_shape.elem  # type: ignore[attr-defined]
+            if hasattr(stacked_local_shape, "elem"):
+                stacked_local_shape = stacked_local_shape.elem  # type: ignore[attr-defined]
+
         meshdim_localtensor_shape[mesh_dim] = stacked_local_shape.detach().cpu().tolist()
     return meshdim_localtensor_shape
 

@@ -9,7 +9,8 @@
 ################################################################################
 
 import warnings
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, List, Union
+from numbers import Number
 
 import torch
 
@@ -187,11 +188,13 @@ class DTensor(torch.Tensor):
         run_check: bool = True,
         shape: Optional[torch.Size] = None,
         stride: Optional[Tuple[int, ...]] = None,
+        support_uneven: bool = True,
         async_input: bool = True,
     ) -> "DTensor":
         # we have to do this to avoid circle import.
         from vescale.dtensor.api import from_local
 
+        # TODO: moving impl code here for performance, as here is on the critial path but api function is less used
         return from_local(
             local_tensor,
             device_mesh,
@@ -199,6 +202,7 @@ class DTensor(torch.Tensor):
             run_check=run_check,
             shape=shape,
             stride=stride,
+            support_uneven=support_uneven,
             async_input=async_input,
         )
 
@@ -210,6 +214,7 @@ class DTensor(torch.Tensor):
     ) -> torch.Tensor:
         from vescale.dtensor.api import to_local
 
+        # TODO: moving impl code here for performance, as here is on the critial path but api function is NEVER used
         return to_local(self, grad_placements=grad_placements, async_output=async_output)
 
     def redistribute(
@@ -220,6 +225,7 @@ class DTensor(torch.Tensor):
     ) -> "DTensor":
         from vescale.dtensor.api import redistribute_dtensor
 
+        # TODO: moving impl code here for performance, as here is on the critial path but api function is rarely used
         return redistribute_dtensor(self, device_mesh=device_mesh, placements=placements, async_op=async_op)
 
     def requires_grad_(self, mode=True):
@@ -229,3 +235,15 @@ class DTensor(torch.Tensor):
     def retain_grad(self) -> None:
         self._local_tensor.retain_grad()
         return super().retain_grad()
+
+    def tolist(self) -> Union[List, Number]:
+        """
+        Returns the dtensor as a (nested) list.
+        For scalars, a standard Python number is returned, just like with item().
+        Tensors are automatically moved to the CPU first if necessary.
+
+        Note:
+        - This operation is not differentiable.
+        - This operation is not dispatched but a torch function.
+        """
+        return self._local_tensor.tolist()

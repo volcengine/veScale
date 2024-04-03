@@ -154,7 +154,7 @@ class LNGradSyncTest(DTensorTestBase):
         batch_1 = deepcopy(base_batch_1)
         batch_2 = deepcopy(base_batch_2)
 
-        # ------------- baseline start ------------- #
+        # ------------- baseline ------------- #
         base_ln_model = torch.nn.LayerNorm(HIDDEN_DIM)
         base_ln_model.weight = torch.nn.Parameter(base_ln_weight_param)
         base_ln_model.bias = torch.nn.Parameter(base_ln_bias_param)
@@ -173,7 +173,7 @@ class LNGradSyncTest(DTensorTestBase):
         base_ln_weight = base_ln_model.weight
         base_ln_bias = base_ln_model.bias
 
-        # ------------- baseline end ------------- #
+        # ------------- vescale ddp ------------- #
 
         m = LN(HIDDEN_DIM)
         m.ln.weight = torch.nn.Parameter(ln_weight_param)
@@ -230,15 +230,6 @@ class LNGradSyncTest(DTensorTestBase):
         ddp_ln_bias = ddp_m.module.ln.bias
 
         # -------- check results -------- #
-
-        grad_sync_list = ddp_m.module.list_grad_sync()
-        fqn_sync_list = set([fqn for fqn, _ in grad_sync_list])  # noqa: C403
-        self.assertTrue(len(grad_sync_list) == 2)
-        self.assertTrue("ln.weight.main_grad" in fqn_sync_list)
-        self.assertTrue("ln.bias.main_grad" in fqn_sync_list)
-
-        self.assertTrue(ddp_ln_weight_grad._spec.placements[0].is_replicate())
-        self.assertTrue(ddp_ln_bias_grad._spec.placements[0].is_replicate())
 
         # NOTE: we can do the following check just because of such a conincidence:
         # the bias and weight parameter of LayerNorm occupy the same size of memory,

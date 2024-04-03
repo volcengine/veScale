@@ -90,15 +90,16 @@ class DTensorTest(DTensorTestBase):
     def test_dtensor_stride(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard0_spec = [Shard(0)]
+        shard1_spec = [Shard(1)]
+
         local_tensor = torch.randn(4, 8)
-        global_shape = torch.Size([self.world_size * 4, 8])
+        # global_shape = torch.Size([self.world_size * 4, 8])
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
         # won't affect stride
         self.assertEqual(dist_tensor.stride(), (8, 1))
 
-        shard1_spec = [Shard(1)]
         local_tensor = torch.randn(8, 4)
-        global_shape = torch.Size([8, self.world_size * 4])
+        # global_shape = torch.Size([8, self.world_size * 4])
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
         # will affect stride after DT initialized
         self.assertEqual(dist_tensor.stride(), (4 * self.world_size, 1))
@@ -106,14 +107,16 @@ class DTensorTest(DTensorTestBase):
         # if initialized from a transposed mat (Even Sharding)
         local_tensor = torch.randn(8, 4, 8)
         local_tensor_t = local_tensor.permute(1, 2, 0)
-        global_shape = torch.Size([4, self.world_size * 8, 8])
+        # global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
-        dist_tensor = DTensor.from_local(local_tensor_t, device_mesh, shard1_spec, run_check=False)
+        dist_tensor = DTensor.from_local(
+            local_tensor_t, device_mesh, shard1_spec, support_uneven=False
+        )  # TODO: resolve
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
         self.assertEqual(dist_tensor.stride(), global_stride)
 
     @with_comms
-    def test_from_local(self):
+    def test_from_local_default(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
         local_tensor = torch.randn(3, 3)
@@ -150,187 +153,116 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(local_tensor_with_grad.grad, expected_grad)
 
     @with_comms
-    def test_from_local_with_given_shape_stride(self):
-        torch.manual_seed(0)
-
+    def test_from_local__check_shape_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         # Assert given shape and stride
         local_tensor = torch.randn(3 * self.world_size, 3)
         global_tensor = local_tensor
         shard_spec = (Replicate(),)
-        with self.assertRaisesRegex(ValueError, "Please pass both shape and stride at the same time."):
+        with self.assertRaisesRegex(ValueError, "Please pass both shape and stride at the same time!"):
             DTensor.from_local(local_tensor, device_mesh, shard_spec, shape=global_tensor.size())
-        with self.assertRaisesRegex(ValueError, "Please pass both shape and stride at the same time."):
+        with self.assertRaisesRegex(ValueError, "Please pass both shape and stride at the same time!"):
             DTensor.from_local(local_tensor, device_mesh, shard_spec, stride=global_tensor.stride())
 
-        # Replicate
-        local_tensor = torch.randn(3 * self.world_size, 3)
-        global_tensor = local_tensor
-        dist_tensor = DTensor.from_local(
-            local_tensor, device_mesh, [Replicate()], shape=global_tensor.shape, stride=global_tensor.stride()
-        )
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
+        # Check Triple kwargs
+        def _core_test(run_check, given_shape_stride, support_uneven):
+            torch.manual_seed(0)
 
-        # Partial
-        local_tensor = torch.randn(3 * self.world_size, 3)
-        global_tensor = local_tensor
-        dist_tensor = DTensor.from_local(
-            local_tensor, device_mesh, [Partial()], shape=global_tensor.shape, stride=global_tensor.stride()
-        )
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor * self.world_size, atol=0, rtol=0)
+            # Replicate
+            local_tensor = torch.randn(3 * self.world_size, 3)
+            global_tensor = local_tensor
+            dist_tensor = DTensor.from_local(
+                local_tensor,
+                device_mesh,
+                [Replicate()],
+                run_check=run_check,
+                shape=global_tensor.shape if given_shape_stride else None,
+                stride=global_tensor.stride() if given_shape_stride else None,
+                support_uneven=support_uneven,
+            )
+            self.assertEqual(dist_tensor.size(), global_tensor.shape)
+            self.assertEqual(dist_tensor.stride(), global_tensor.stride())
+            dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
+            self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
 
-        # Even Shard(0)
-        local_tensors = [torch.randn(3, 3) for _ in range(self.world_size)]
-        global_tensor = torch.concat(local_tensors, dim=0)
-        dist_tensor = DTensor.from_local(
-            local_tensors[self.rank], device_mesh, [Shard(0)], shape=global_tensor.shape, stride=global_tensor.stride()
-        )
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
+            # Partial
+            local_tensor = torch.randn(3 * self.world_size, 3)
+            global_tensor = local_tensor
+            dist_tensor = DTensor.from_local(
+                local_tensor,
+                device_mesh,
+                [Partial()],
+                run_check=run_check,
+                shape=global_tensor.shape if given_shape_stride else None,
+                stride=global_tensor.stride() if given_shape_stride else None,
+                support_uneven=support_uneven,
+            )
+            self.assertEqual(dist_tensor.size(), global_tensor.shape)
+            self.assertEqual(dist_tensor.stride(), global_tensor.stride())
+            dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
+            self.assertEqual(dist_tensor._local_tensor, global_tensor * self.world_size, atol=0, rtol=0)
 
-        # Uneven Shard(0) without pad
-        global_tensor = torch.randn(self.world_size + 1, 2)
-        local_tensors, _ = Shard(0)._split_tensor(
-            global_tensor,
-            device_mesh.size(dim=0),
-            with_padding=False,
-            contiguous=True,
-        )
-        dist_tensor = DTensor.from_local(
-            local_tensors[self.rank],
-            device_mesh,
-            (Shard(0),),
-            shape=global_tensor.size(),
-            stride=global_tensor.stride(),
-        )
-        self.assertEqual(dist_tensor.size(), global_tensor.size())
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
+            # Even Shard(0)
+            local_tensors = [torch.randn(3, 3) for _ in range(self.world_size)]
+            global_tensor = torch.concat(local_tensors, dim=0)
+            dist_tensor = DTensor.from_local(
+                local_tensors[self.rank],
+                device_mesh,
+                [Shard(0)],
+                run_check=run_check,
+                shape=global_tensor.shape if given_shape_stride else None,
+                stride=global_tensor.stride() if given_shape_stride else None,
+                support_uneven=support_uneven,
+            )
+            self.assertEqual(dist_tensor.size(), global_tensor.shape)
+            self.assertEqual(dist_tensor.stride(), global_tensor.stride())
+            dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
+            self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
 
-        # # Uneven Shard(0) with pad # TODO
-        # global_tensor = torch.randn(self.world_size + 1, 2)
-        # local_tensors, _ = Shard(0)._split_tensor(
-        #     global_tensor,
-        #     device_mesh.size(dim=0),
-        #     with_padding=True,
-        #     contiguous=True,
-        # )
-        # with self.assertRaisesRegex(
-        #     ValueError, "Given global shape and stride does not match local shape and stride!"
-        # ):
-        #     DTensor.from_local(local_tensors[self.rank], device_mesh, (Shard(0),),
-        #                         shape=global_tensor.size(), stride=global_tensor.stride())
+            # Uneven Shard(0) without pad
+            global_tensor = torch.randn(self.world_size + 1, 2)
+            local_tensors, _ = Shard(0)._split_tensor(
+                global_tensor,
+                device_mesh.size(dim=0),
+                with_padding=False,
+                contiguous=True,
+            )
+            dist_tensor = DTensor.from_local(
+                local_tensors[self.rank],
+                device_mesh,
+                (Shard(0),),
+                run_check=run_check,
+                shape=global_tensor.shape if given_shape_stride else None,
+                stride=global_tensor.stride() if given_shape_stride else None,
+                support_uneven=True,
+            )
+            self.assertEqual(dist_tensor.size(), global_tensor.size())
+            self.assertEqual(dist_tensor.stride(), global_tensor.stride())
+            dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
+            self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
 
-    @with_comms
-    def test_from_local_without_given_shape_stride(self):
-        torch.manual_seed(0)
+            # # Uneven Shard(0) with pad # TODO
+            # global_tensor = torch.randn(self.world_size + 1, 2)
+            # local_tensors, _ = Shard(0)._split_tensor(
+            #     global_tensor,
+            #     device_mesh.size(dim=0),
+            #     with_padding=True,
+            #     contiguous=True,
+            # )
+            # with self.assertRaisesRegex(
+            #     ValueError, "Given global shape and stride does not match local shape and stride!"
+            # ):
+            #     DTensor.from_local(local_tensors[self.rank], device_mesh, (Shard(0),),
+            #                       run_check=run_check,
+            #                       shape=global_tensor.shape if given_shape_stride else None,
+            #                       stride=global_tensor.stride() if given_shape_stride else None,
+            #                       support_uneven=True,)
 
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-
-        # Replicate
-        local_tensor = torch.randn(3 * self.world_size, 3)
-        global_tensor = local_tensor
-        dist_tensor = DTensor.from_local(local_tensor, device_mesh, [Replicate()])
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
-
-        # Partial
-        local_tensor = torch.randn(3 * self.world_size, 3)
-        global_tensor = local_tensor
-        dist_tensor = DTensor.from_local(local_tensor, device_mesh, [Partial()])
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor * self.world_size, atol=0, rtol=0)
-
-        # Even Shard(0)
-        local_tensors = [torch.randn(3, 3) for _ in range(self.world_size)]
-        global_tensor = torch.concat(local_tensors, dim=0)
-        dist_tensor = DTensor.from_local(local_tensors[self.rank], device_mesh, [Shard(0)])
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
-
-        # Uneven Shard(0) without pad
-        global_tensor = torch.randn(self.world_size + 1, 2)
-        local_tensors, _ = Shard(0)._split_tensor(
-            global_tensor,
-            device_mesh.size(dim=0),
-            with_padding=False,
-            contiguous=True,
-        )
-        dist_tensor = DTensor.from_local(local_tensors[self.rank], device_mesh, (Shard(0),))
-        self.assertEqual(dist_tensor.size(), global_tensor.size())
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
-
-    @with_comms
-    def test_from_local_without_run_check(self):
-        torch.manual_seed(0)
-
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-
-        # Replicate
-        local_tensor = torch.randn(3 * self.world_size, 3)
-        global_tensor = local_tensor
-        dist_tensor = DTensor.from_local(local_tensor, device_mesh, [Replicate()], run_check=False)
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
-
-        # Partial
-        local_tensor = torch.randn(3 * self.world_size, 3)
-        global_tensor = local_tensor
-        dist_tensor = DTensor.from_local(local_tensor, device_mesh, [Partial()], run_check=False)
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor * self.world_size, atol=0, rtol=0)
-
-        # Even Shard(0)
-        local_tensors = [torch.randn(3, 3) for _ in range(self.world_size)]
-        global_tensor = torch.concat(local_tensors, dim=0)
-        dist_tensor = DTensor.from_local(local_tensors[self.rank], device_mesh, [Shard(0)], run_check=False)
-        self.assertEqual(dist_tensor.size(), global_tensor.shape)
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
-
-        # Uneven Shard(0) without pad
-        global_tensor = torch.randn(self.world_size + 1, 2)
-        local_tensors, _ = Shard(0)._split_tensor(
-            global_tensor,
-            device_mesh.size(dim=0),
-            with_padding=False,
-            contiguous=True,
-        )
-        dist_tensor = DTensor.from_local(
-            local_tensors[self.rank],
-            device_mesh,
-            (Shard(0),),
-            run_check=False,
-            shape=global_tensor.size(),
-            stride=global_tensor.stride(),
-        )
-        self.assertEqual(dist_tensor.size(), global_tensor.size())
-        self.assertEqual(dist_tensor.stride(), global_tensor.stride())
-        dist_tensor = dist_tensor.redistribute(placements=[Replicate()])
-        self.assertEqual(dist_tensor._local_tensor, global_tensor, atol=0, rtol=0)
+        for run_check in [True, False]:
+            for given_shape_stride in [True, False]:
+                for support_uneven in [True, False]:
+                    _core_test(run_check, given_shape_stride, support_uneven)
 
     @with_comms
     def test_to_local(self):
@@ -816,7 +748,7 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x
 
-        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
+        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False, support_uneven=False)
         ref = fn(x)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -831,7 +763,7 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x * x + 2
 
-        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
+        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False, support_uneven=False)
         ref = fn(x)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -844,7 +776,7 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
 
         # create DTensor inside fn and run some compute
         def fn(x):
-            dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+            dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False, support_uneven=False)
             return dt.to_local() + 2
 
         # below is the op approach for reference
@@ -871,7 +803,7 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
         # pass in tensor as inputs/outputs, create DTensor and run redistribute
         # (allgather collective) inside the fn
         def fn(x):
-            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False, support_uneven=False)
             return dt.redistribute(mesh, [Replicate()]).to_local() + 2
 
         x = torch.ones(1)

@@ -8,13 +8,16 @@
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
+from typing import List
 from common_dtensor import DTensorTestBase, with_comms
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import run_tests
 
-from vescale import DeviceMesh, Replicate, Shard, distribute_tensor
+from vescale.dtensor.device_mesh import DeviceMesh
+from vescale.dtensor.api import distribute_tensor
+from vescale.dtensor.placement_types import Replicate, Shard
 
 
 class MyModel(nn.Module):
@@ -112,6 +115,19 @@ class DTensorAPITest(DTensorTestBase):
         dtensor = distribute_tensor(tensor_to_distribute, device_mesh, spec)
         out = my_jit_add(dtensor)
         self.assertEqual(out.to_local(), torch.tan(tensor_to_distribute + 1))
+
+    @with_comms
+    def test_tolist(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        global_shape = (self.world_size, self.world_size)
+        for shard_spec in [[Replicate()], [Shard(0)], [Shard(1)]]:
+            dist_tensor = distribute_tensor(torch.ones(global_shape, dtype=torch.float32), device_mesh, shard_spec)
+            nested_list = dist_tensor.tolist()
+            self.assertTrue(isinstance(nested_list, List))
+            self.assertTrue(isinstance(nested_list[0], List))
+            self.assertTrue(nested_list[0][0] == 1.0)
+            shape = (len(nested_list), len(nested_list[0]))
+            self.assertEqual(shape, dist_tensor._local_tensor.shape)
 
 
 if __name__ == "__main__":

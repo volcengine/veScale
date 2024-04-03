@@ -15,7 +15,6 @@ import torch.distributed.distributed_c10d as c10d
 
 from vescale.dtensor import DeviceMesh
 from vescale.dtensor.op_schema import OpSchema, OutputSharding, RuntimeSchemaInfo, OpStrategy, PlacementStrategy
-from vescale.dtensor.ops.common_rules import pointwise_rule
 from vescale.dtensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
@@ -190,6 +189,36 @@ def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     )
 
 
+@register_op_strategy([aten.mse_loss.default])
+def mse_loss_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    input_strategy, label_strategy = op_schema.args_schema
+    assert isinstance(input_strategy, OpStrategy)
+    assert input_strategy.strategies[0].output_spec.placements == label_strategy.strategies[0].output_spec.placements
+    reduce_dims = list(range(input_strategy.output_ndim))
+    out = common_reduction_strategy(
+        mesh,
+        input_strategy,
+        reduce_dims,
+        keep_dim=False,
+        reduction_linear=True,
+        reduction_op=c10d.ReduceOp.AVG,
+    )
+    input_spec = out.strategies[0].input_specs[0]
+    label_spec = label_strategy.strategies[0].output_spec
+    out.strategies[0].input_specs = (input_spec, label_spec)
+    return out
+
+
+@register_op_strategy([aten.mse_loss_backward.default])
+def mse_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    grad_strategy, lhs_strategy, rhs_strategy, _ = op_schema.args_schema
+
+    if any(placement.is_partial() for placement in grad_strategy.strategies[0].output_spec.placements):
+        raise RuntimeError("MSE meet backward with partial, if that you need to call allreduce before backward")
+
+    return OpStrategy([PlacementStrategy(output_spec=lhs_strategy.strategies[0].output_spec)])
+
+
 @register_op_strategy([aten.argmax.default, aten.argmin.default], schema_info=RuntimeSchemaInfo(1))
 def arg_max_min(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
@@ -320,7 +349,9 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     out_dim_map = out_spec.dim_map
     if softmax_dim < len(grad_out_dim_map) and (grad_out_dim_map[softmax_dim] >= 0 or out_dim_map[softmax_dim] >= 0):
         raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
-    return pointwise_rule(op_schema)
+    # (Hongyu), support P on grad_out_spec
+    # return pointwise_rule(op_schema)
+    return OutputSharding(grad_out_spec)
 
 
 @register_op_strategy(
@@ -468,10 +499,11 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
             sharded_input_mesh_dims[input_dim] = []
         sharded_input_mesh_dims[input_dim].append(i)
     assert len(sharded_input_mesh_dims) == 1, "input of layernorm must be sharded along only one dim"
-    param_grad_placements = [Replicate()] * weight.mesh.ndim
+    param_grad_placements = [Replicate()] * weight.mesh.ndim if weight is not None else None
     sharded_input_dim = list(sharded_input_mesh_dims.keys())[0]
-    for mesh_dim in sharded_input_mesh_dims[sharded_input_dim]:
-        param_grad_placements[mesh_dim] = Partial()
+    if param_grad_placements is not None:
+        for mesh_dim in sharded_input_mesh_dims[sharded_input_dim]:
+            param_grad_placements[mesh_dim] = Partial()
 
     weight_grad = (
         DTensorSpec(

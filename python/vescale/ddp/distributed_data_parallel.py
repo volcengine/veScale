@@ -9,10 +9,8 @@ from typing import Dict, Union
 import torch
 import torch.distributed.distributed_c10d as c10d
 
-from vescale.dmodule._dmodule import DModule
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.device_mesh import DeviceMesh
-from vescale.dtensor.placement_types import DTensorSpec
 from vescale.ddp.grad_buffer import GradBuffer
 
 
@@ -62,7 +60,6 @@ class DistributedDataParallel(torch.nn.Module):
         # run the forward.
         ddp_module(torch.rand(xxx))
         ```
-        TODO: remove `shared` attributed attached by Megatron.
     """
 
     def __init__(
@@ -192,14 +189,26 @@ class DistributedDataParallel(torch.nn.Module):
                     assert param.grad is not None, "param.grad being None is not safe when overlap_grad_reduce is True"
                 # NOTE: it seems that there are some place where grad_added_to_main_grad is True.
                 # what will happen then?
+
                 # TODO: remove grad_added_to_main_grad attribute.
+                model_parallel_device_mesh, placements = None, None
                 if param.grad is not None and not param.grad_added_to_main_grad:
                     if isinstance(param.data, DTensor):
                         param.main_grad.add_(param.grad._local_tensor.data)  # add DTensor's data
-                        param.main_grad._spec: DTensorSpec = param.grad._spec  # save DTensor's spec
+                        model_parallel_device_mesh = param.grad._spec.mesh
+                        placements = param.grad._spec.placements
                     else:
                         param.main_grad.add_(param.grad.data)
                 param.grad = None
+
+                if (
+                    model_parallel_device_mesh is not None
+                    and placements is not None
+                    and any(p.is_partial() for p in placements)
+                ):
+                    param_to_grad_buffer[param].register_partial_grad_ready(
+                        param, model_parallel_device_mesh, placements
+                    )
                 if self.overlap_grad_reduce:
                     param_to_grad_buffer[param].register_grad_ready(param)
 
@@ -228,11 +237,6 @@ class DistributedDataParallel(torch.nn.Module):
         """
         for grad_buffer in self.grad_buffers.values():
             grad_buffer.finish_grad_sync()
-
-        # NOTE: here we do DDP.AllReduce(Mean) before DModule.AllReduce(Sum),
-        # which can cause different precision with Megatron baseline.
-        if DModule.is_dmodule(self.module):
-            self.module.finish_grad_sync()
 
         for expert_grad in self.expert_grads:
             expert_grad /= self.data_parallel_world_size

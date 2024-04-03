@@ -138,6 +138,24 @@ def is_tensor_all_replicate(spec: DTensorSpec) -> bool:
     return all(p.is_replicate() for p in spec.placements)
 
 
+def is_tensor_all_replicate_except_sharded_at_dim(
+    spec: DTensorSpec,
+    tensor_dim: int,
+    exclude_interleaved_shard: bool = False,
+) -> bool:
+    for p in spec.placements:
+        if p.is_replicate():
+            continue
+        if p.is_partial():
+            return False
+        if exclude_interleaved_shard and p.is_interleaved_shard():
+            return False
+        if p.is_shard():
+            if p.dim != tensor_dim:
+                return False
+    return True
+
+
 def map_placements_after_broadcast(
     placements: Tuple[Placement, ...],
     shape: torch.Size,
