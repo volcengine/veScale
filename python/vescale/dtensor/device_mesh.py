@@ -29,6 +29,8 @@ from torch.distributed.distributed_c10d import (
     new_group,
 )
 
+from vescale.debug import DebugLogger
+
 logger = logging.getLogger(__name__)
 
 # only import numpy typing when type checking
@@ -229,6 +231,8 @@ class DeviceMesh:
         _validate_mesh: bool = True,
         _init_process_groups: bool = True,
     ) -> None:
+        # for performance, update debug env once here
+        DebugLogger.update_vescale_debug_mode_from_env()
         # check args
         if mesh is None and pg is None:
             raise ValueError("Either `mesh` or `pg` must be provided!")

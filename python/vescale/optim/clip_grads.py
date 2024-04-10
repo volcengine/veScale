@@ -55,10 +55,11 @@ def clip_grad_norm_fp32(
 
     # Grads.
     grads = []
+    grad_dtype = None
     for param in parameters:
         if param.grad is not None:
-            assert param.grad.type() == "torch.cuda.FloatTensor"
             grads.append(param.grad.detach())
+            grad_dtype = grads[-1].dtype
 
     # Norm parameters.
     max_norm = float(max_norm)
@@ -116,5 +117,7 @@ def clip_grad_norm_fp32(
                 g.data.mul_(clip_coeff)
         else:
             multi_tensor_applier(amp_C.multi_tensor_scale, dummy_overflow_buf, [grads, grads], clip_coeff)
+        for g in grads:
+            g.to(grad_dtype)
 
     return total_norm

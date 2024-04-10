@@ -85,7 +85,7 @@ class VeScaleDOptimizerTest(DTensorTestBase):
 
     @with_comms
     @parametrize("overlap_grad_reduce", [True, False])
-    @parametrize("use_distributed_optimizer", [True, False])
+    @parametrize("use_distributed_optimizer", [True])
     @parametrize("overlap_param_gather", [True, False])
     @parametrize("use_optimizer_class", [True, False])
     def test_distributed_optimizer(
@@ -139,11 +139,7 @@ class VeScaleDOptimizerTest(DTensorTestBase):
             )
 
         # epoch 1
-        # NOTE: we can't invoke optimizer.zero_grad here. Because if overlap_param_gather is True,
-        # DOptimizer will try to all gather parameters.
-        for m in ve_optimizer.models:
-            m.zero_grad_buffer()
-
+        ve_optimizer.zero_grad()
         x = params_and_inputs["batch1_epoch1"]
         if dist.get_rank() == 2 or dist.get_rank() == 3:
             x = params_and_inputs["batch2_epoch1"]

@@ -16,7 +16,6 @@ import torch.distributed._functional_collectives as funcol
 from torch._prims_common import ShapeType
 
 from vescale.dtensor.device_mesh import DeviceMesh
-from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.placement_types import InterleavedShard, Partial, Placement, Replicate, Shard
 from vescale.dtensor._collective_utils import mesh_all_gather
 
@@ -320,8 +319,8 @@ def is_zero_out_local_shard(mesh: DeviceMesh, placements: Sequence[Placement]) -
     return False
 
 
-def _equal_meta_data(dt1: DTensor, dt2: DTensor, exact_device: bool) -> bool:
-    if type(dt1) is not DTensor or type(dt2) is not DTensor:
+def _equal_meta_data(dt1, dt2, exact_device: bool) -> bool:
+    if type(dt1).__name__ != "DTensor" or type(dt2).__name__ != "DTensor":
         return False
     # check itself
     if exact_device and (dt1.device.type != dt2.device.type):
@@ -368,7 +367,7 @@ def _equal_meta_data(dt1: DTensor, dt2: DTensor, exact_device: bool) -> bool:
     return True
 
 
-def equal(dt1: DTensor, dt2: DTensor, exact_device: bool = True) -> bool:
+def equal(dt1, dt2, exact_device: bool = True) -> bool:
     """
     check if two DTensors are 'exactly' equal
     """
@@ -383,8 +382,8 @@ def equal(dt1: DTensor, dt2: DTensor, exact_device: bool = True) -> bool:
 
 
 def allclose(
-    dt1: DTensor,
-    dt2: DTensor,
+    dt1,
+    dt2,
     rtol: float = 1e-05,
     atol: float = 1e-08,
     equal_nan: bool = False,
@@ -409,7 +408,7 @@ def allclose(
 
 def compute_local_offset(global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]) -> Tuple[int, ...]:
     """
-    Compute the offsets of a local shard of the given DTensor on its current
+    Compute the offsets of a local shard of the given "DTensor" on its current
     global rank. This is mostly used by distributed checkpointing to know the
     exact offsets of the local shard.
     """

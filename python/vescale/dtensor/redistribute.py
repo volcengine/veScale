@@ -440,7 +440,7 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: List[Placement],
+        placements: Tuple[Placement],
         async_op: bool = True,
     ):
         current_spec = input._spec
@@ -451,7 +451,7 @@ class Redistribute(torch.autograd.Function):
         if input._spec.placements == placements:
             return input
 
-        target_spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=input._spec.tensor_meta)
+        target_spec = DTensorSpec(device_mesh, placements, tensor_meta=input._spec.tensor_meta)
 
         local_tensor = input._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec, async_op)

@@ -48,15 +48,18 @@ __all__ = [
     "DeviceMesh",
     "init_device_mesh",
     "normalize_placements",
+    "from_local",
+    "to_local",
     "distribute_tensor",
     "redistribute_dtensor",
+    "vescale_all_gather",
+    "vescale_all_reduce",
+    "vescale_reduce_scatter",
     "Placement",
     "Partial",
     "Replicate",
     "Shard",
     "InterleavedShard",
-    "from_local",
-    "to_local",
     "deferred_init",
     "is_deferred",
     "materialize_dtensor",
@@ -81,7 +84,7 @@ def deprecated_function(func):
 torch.jit.script = deprecated_function
 
 
-# dynamo utils
+# dynamo utils # TODO: move this out of __init__
 def switch_dtensor_for_torch_export(ep: torch.export.ExportedProgram):
     print(ep.graph_signature.parameters)
     if not isinstance(ep, torch.export.ExportedProgram):

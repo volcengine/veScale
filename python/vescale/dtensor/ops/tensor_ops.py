@@ -10,6 +10,7 @@
 
 from typing import List, Optional, Sequence, Tuple, cast
 
+import copy
 import torch
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -796,7 +797,7 @@ def unbind_rule(op_schema: OpSchema) -> OutputSharding:
     output_spec_list: List[DTensorSpec] = []
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
     ndim = input_spec.ndim
-    dim = cast(int, op_schema.args_schema[1])
+    dim = cast(int, op_schema.args_schema[1] if len(op_schema.args_schema) > 1 else 0)
     dim = normalize_dim(dim, ndim)
 
     # TODO: tensor to unbind cannot have Partial
@@ -886,4 +887,11 @@ def index_add_rule(op_schema: OpSchema) -> OutputSharding:
 @register_prop_rule(aten.alias.default)
 def _prop_aten_alias(op_schema: OpSchema) -> OutputSharding:
     output_spec = cast(DTensorSpec, op_schema.args_schema[0])
+    return OutputSharding(output_spec=output_spec)
+
+
+@register_prop_rule(aten.nonzero.default)
+def _nonzero_prop(op_schema: OpSchema):
+    output_spec = cast(DTensorSpec, copy.deepcopy(op_schema.args_schema[0]))
+    output_spec.tensor_meta = None
     return OutputSharding(output_spec=output_spec)

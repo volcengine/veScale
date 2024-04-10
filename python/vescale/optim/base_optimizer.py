@@ -164,7 +164,7 @@ class BasicOptimizer(OptimizerBase):
             self.models = [self.models]
 
         if any(getattr(x, "use_distributed_optimizer", False) for x in self.models):
-            raise RuntimeError(
+            raise ValueError(
                 "detected DDP with use_distributed_optimizer on, please consider use a distributed optimizer"
             )
 

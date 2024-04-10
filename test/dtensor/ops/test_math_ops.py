@@ -197,6 +197,14 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(d_result.values.full_tensor(), local_result.values)
 
     @with_comms
+    def test_topk_no_dim(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(8, 8)
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(1)])
+        topk_no_dim = torch.topk(tensor, 2)
+        dtopk_no_dim = torch.topk(dtensor, 2)
+
+    @with_comms
     def test_topk_backward(self):
         device_mesh = self.build_device_mesh()
         tensor = torch.randn((8, 8), requires_grad=True)

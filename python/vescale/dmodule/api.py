@@ -25,6 +25,7 @@ from torch import nn
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
 from vescale.dmodule._dmodule import DModule
 from vescale.dmodule.placements_interface import PlacementsInterface
+from vescale.debug import DebugLogger
 
 __all__ = ["parallelize_module", "is_dmodule", "PlacementsInterface"]
 
@@ -239,6 +240,9 @@ def parallelize_module(
         optimizer.step()
 
     """
+
+    # for performance, update debug env once here
+    DebugLogger.update_vescale_debug_mode_from_env()
 
     if DModule.is_dmodule(module):
         warnings.warn(f"{module} is already parallelized `DModule`. Skip `parallelize_module`", UserWarning)

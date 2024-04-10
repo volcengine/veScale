@@ -29,6 +29,7 @@ from torch.distributed.distributed_c10d import (
 
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
 from vescale.dtensor.placement_types import DTensorSpec
+from vescale.debug import DebugLogger
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,9 @@ def mesh_scatter(
     Returns:
         A :class:`Work` object
     """
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(mesh_scatter, output, scatter_list, mesh_dim, async_op)
+
     # if rank is not part of mesh, simply return output
     if mesh.get_coordinate() is None:
         return output
@@ -112,6 +116,9 @@ def mesh_all_to_all(
     mesh_dim: int = 0,
     async_op: bool = False,
 ) -> Optional[Work]:
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(mesh_all_to_all, output_tensor_list, input_tensor_list, mesh, mesh_dim, async_op)
+
     # if rank is not part of mesh, simply return None
     if mesh.get_coordinate() is None:
         return None
@@ -170,6 +177,9 @@ def mesh_broadcast(
     Returns:
         A :class:`Tensor` object
     """
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(mesh_broadcast, tensor, mesh, mesh_dim, async_op)
+
     # if rank is not part of mesh, simply return tensor, which should be an empty tensor
     if mesh.get_coordinate() is None:
         return tensor
@@ -203,6 +213,10 @@ def mesh_reduce_scatter(
     First peform all_reduce on the tensor, then split the tensor at scatter_dim
     and scatter them to a device mesh dimension.
     """
+
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(mesh_reduce_scatter, tensor, mesh, reduce_op, scatter_dim, mesh_dim)
+
     # if rank is not part of mesh, simply return tensor, which should be an empty tensor
     if mesh.get_coordinate() is None:
         return tensor
@@ -230,6 +244,9 @@ def mesh_all_gather(
     all_gather all shards and return a tensor that is replicated
     on the previously sharded mesh dimension
     """
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(mesh_all_gather, tensor, global_size, mesh, scatter_dim, mesh_dim)
+
     # if rank is not part of mesh, simply return tensor, which should be an empty tensor
     if mesh.get_coordinate() is None:
         return tensor

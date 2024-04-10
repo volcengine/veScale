@@ -14,7 +14,14 @@ import torch
 import torch.distributed.distributed_c10d as c10d
 
 from vescale.dtensor import DeviceMesh
-from vescale.dtensor.op_schema import OpSchema, OutputSharding, RuntimeSchemaInfo, OpStrategy, PlacementStrategy
+from vescale.dtensor.op_schema import (
+    OpSchema,
+    OutputSharding,
+    RuntimeSchemaInfo,
+    OpStrategy,
+    PlacementStrategy,
+    TupleStrategy,
+)
 from vescale.dtensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
@@ -257,38 +264,25 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy([aten.topk.default])
-def topk(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def topk(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrategy:
     input_strategy = op_schema.args_schema[0]
     dim = op_schema.args_schema[2] if len(op_schema.args_schema) > 2 else -1
     input_strategy = cast(OpStrategy, input_strategy)
     dim = cast(int, dim)
     dim = normalize_dim(dim, input_strategy.output_ndim)
+    input_placement_strategy = input_strategy.strategies[0]
+    input_src_spec = input_placement_strategy.output_spec
 
-    output_strategy = OpStrategy([])
-    for input_placement_strategy in input_strategy.strategies:
-        redistribute_costs = []
-        input_src_spec = input_placement_strategy.output_spec
+    output_target_spec = DTensorSpec(mesh=mesh, placements=input_src_spec.placements)
+    value_out_strategy = PlacementStrategy(
+        output_spec=output_target_spec,
+    )
 
-        # make sure input is replicated along the sort dim
-        input_target_spec = DTensorSpec(
-            mesh=mesh,
-            placements=replicate_reduction_dims(input_src_spec.placements, [dim]),
-            tensor_meta=input_src_spec.tensor_meta,
-        )
-        # TODO: change to vescale stype redistribution
-        redistribute_costs.append(generate_redistribute_costs(input_strategy, input_target_spec))
-        output_target_spec = DTensorSpec(
-            mesh=mesh,
-            placements=input_target_spec.placements,
-        )
-        output_strategy.strategies.append(
-            PlacementStrategy(
-                output_spec=output_target_spec,
-                input_specs=[input_target_spec],
-                redistribute_cost=redistribute_costs,
-            )
-        )
+    index_out_strategy = PlacementStrategy(
+        output_spec=output_target_spec,
+    )
 
+    output_strategy = TupleStrategy(childs=[OpStrategy([value_out_strategy]), OpStrategy([index_out_strategy])])
     return output_strategy
 
 

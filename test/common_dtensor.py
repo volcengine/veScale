@@ -28,9 +28,10 @@ from torch.testing._internal.common_distributed import (
 import torch.testing._internal.distributed.fake_pg as fake_pg
 from torch.utils._pytree import TreeSpec, tree_flatten, tree_unflatten
 
-import vescale
-from vescale import DeviceMesh, Shard, Replicate, distribute_tensor, DTensor
-from vescale.dtensor.placement_types import Placement, DTensorSpec
+from vescale.dtensor.device_mesh import DeviceMesh
+from vescale.dtensor.api import distribute_tensor
+from vescale.dtensor import DTensor
+from vescale.dtensor.placement_types import Placement, Shard, Replicate, DTensorSpec
 
 # add new skipped test exit code
 TEST_SKIPS["torch-version-2.2"] = TestSkip(90, "Need torch version bigger than 2.2")
@@ -94,6 +95,8 @@ class RedistributeProfile:
 
 @contextmanager
 def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
+    import vescale
+
     orig_redistribute_local_tensor = vescale.dtensor.redistribute.redistribute_local_tensor
     profile: RedistributeProfile = RedistributeProfile(num_calls=0)
 

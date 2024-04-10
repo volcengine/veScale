@@ -47,42 +47,50 @@ def parse(log_fn, name=None):
     print(f'"{name}": {val_losses},')
 
 
+GPU_CNT = 4
+DP_SIZES = [4, 2, 1]
+SINGLE_GPU_RUN = "python3"
+MULTI_GPU_RUN = "torchrun --standalone --nproc_per_node=4"
+CONFIG = "config/finetune_shakespeare.py"
+LOG_PREFIX = ""
+
+
 def run_exps(max_iters, dtypes, run=True):
     os.makedirs("logs", exist_ok=True)
     if run:
         for dtype in dtypes:
             dt = "bfloat16" if dtype == "bf16" else "float32"
-            cmd = f"python3 base_train.py config/finetune_shakespeare.py --compile=False --wandb_log=False --max_iters={max_iters} --dtype='{dt}'"
-            log_fn = f"logs/1gpu_{dtype}_max_iters_{max_iters}.log"
+            cmd = f"{SINGLE_GPU_RUN} base_train.py {CONFIG} --compile=False --max_iters={max_iters} --dtype='{dt}'"
+            log_fn = f"logs/{LOG_PREFIX}_1gpu_{dtype}_max_iters_{max_iters}.log"
             print(f"run {cmd} > {log_fn} 2> {log_fn}.err")
             os.system(f"{cmd} > {log_fn} 2> {log_fn}.err")
-        for dp_size in [1, 2, 4]:
-            tp_size = 4 // dp_size
+        for dp_size in DP_SIZES:
+            tp_size = GPU_CNT // dp_size
             for dtype in dtypes:
                 dt = "bfloat16" if dtype == "bf16" else "float32"
-                cmd = f"torchrun --standalone --nproc_per_node=4 finetune_4D.py config/finetune_shakespeare.py --compile=False --use_DO=True --wandb_log=False --dp_size={dp_size} --tp_size={tp_size} --max_iters={max_iters} --dtype='{dt}'"
-                log_fn = f"logs/4gpu_dp{dp_size}_tp{tp_size}_{dtype}_max_iters_{max_iters}.log"
+                cmd = f"{MULTI_GPU_RUN} finetune_4D.py {CONFIG} --compile=False --DDP_grads_in_fp32=False --dp_size={dp_size} --tp_size={tp_size} --max_iters={max_iters} --dtype='{dt}'"
+                log_fn = f"logs/{LOG_PREFIX}_{GPU_CNT}gpu_dp{dp_size}_tp{tp_size}_{dtype}_max_iters_{max_iters}.log"
                 print(f"run {cmd} > {log_fn} 2> {log_fn}.err")
                 os.system(f"{cmd} > {log_fn} 2> {log_fn}.err")
 
     print("train_loss = {")
     for dtype in dtypes:
-        parse_train_loss(f"logs/1gpu_{dtype}_max_iters_{max_iters}.log", f"1GPU_{dtype}")
-        for dp_size in [1, 2, 4]:
-            tp_size = 4 // dp_size
-            log_fn = f"logs/4gpu_dp{dp_size}_tp{tp_size}_{dtype}_max_iters_{max_iters}.log"
+        parse_train_loss(f"logs/{LOG_PREFIX}_1gpu_{dtype}_max_iters_{max_iters}.log", f"1GPU_{dtype}")
+        for dp_size in DP_SIZES:
+            tp_size = GPU_CNT // dp_size
+            log_fn = f"logs/{LOG_PREFIX}_{GPU_CNT}gpu_dp{dp_size}_tp{tp_size}_{dtype}_max_iters_{max_iters}.log"
             parse_train_loss(log_fn, f"4GPU_DP{dp_size}_TP{tp_size}_{dtype}")
     print("}")
 
     print("val_loss = {")
     for dtype in dtypes:
-        parse(f"logs/1gpu_{dtype}_max_iters_{max_iters}.log", f"1GPU_{dtype}")
-        for dp_size in [1, 2, 4]:
-            tp_size = 4 // dp_size
-            log_fn = f"logs/4gpu_dp{dp_size}_tp{tp_size}_{dtype}_max_iters_{max_iters}.log"
+        parse(f"logs/{LOG_PREFIX}_1gpu_{dtype}_max_iters_{max_iters}.log", f"1GPU_{dtype}")
+        for dp_size in DP_SIZES:
+            tp_size = GPU_CNT // dp_size
+            log_fn = f"logs/{LOG_PREFIX}_{GPU_CNT}gpu_dp{dp_size}_tp{tp_size}_{dtype}_max_iters_{max_iters}.log"
             parse(log_fn, f"4GPU_DP{dp_size}_TP{tp_size}_{dtype}")
     print("}")
 
 
 if __name__ == "__main__":
-    run_exps(200, ["bf16", "fp32"], run=True)
+    run_exps(200, ["bf16"], run=True)
