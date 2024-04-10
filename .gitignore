@@ -24,3 +24,8 @@
 
 # pre-commit config
 ./.pre-commit-config.yaml
+
+# checkpoint
+*.checkpoint_dir
+*.distcp
+.metadata

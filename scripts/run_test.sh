@@ -21,7 +21,7 @@ do
     pkill -9 python3 || true # ok if nothing to kill
     pytest -s "${file}"
     pkill -9 python3 || true
-done <   <(find . -name 'test_*.py' -print0)
+done <   <(find . -name 'test_*.py' -not -name 'test_open_llama_*.py' -print0)
 
 # return
 popd

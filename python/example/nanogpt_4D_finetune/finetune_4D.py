@@ -42,7 +42,7 @@ from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 from vescale.optim.base_optimizer import BasicOptimizer, GradOptimizerHookBase
 from sharding_plan import nanoGPT_plan
-
+import vescale
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -93,7 +93,8 @@ use_DO = True
 dp_size = 4
 tp_size = 1
 DDP_grads_in_fp32 = True
-
+save_checkpoint_path = "./nanogpt_checkpoint_dir"
+load_checkpoint_path = ""
 config = {}
 
 
@@ -208,8 +209,7 @@ def main():
         for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
             model_args[k] = getattr(model.config, k)
     elif init_from == "resume":
-        print("WARNING: checkpointing is not supported")
-        print(f"Resuming the training process from: {out_dir}")
+        print(f"Resuming the training process from: {load_checkpoint_path}")
         # determine the vocab size we'll use for from-scratch training
         if meta_vocab_size is None:
             print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
@@ -326,6 +326,11 @@ def main():
         global config
         wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
+    # Load checkpoint
+    if load_checkpoint_path:
+        checkpoint_state = {"model": model, "optimizer": optimizer}
+        with mesh:
+            vescale.checkpoint.load(load_checkpoint_path, checkpoint_state)
     # training loop
     X, Y = get_batch("train")  # fetch the very first batch
     t0 = time.time()
@@ -354,6 +359,12 @@ def main():
                             "mfu": running_mfu * 100,  # convert to percentage
                         }
                     )
+            if iter_num > 0:
+                # When iter_num == 0, the training does not start sotoptimizer state is empty,
+                # Don't save checkpoint
+                checkpoint_state = {"model": model, "optimizer": optimizer}
+                with mesh:
+                    vescale.checkpoint.save(os.path.join(save_checkpoint_path, f"iter_{iter_num}"), checkpoint_state)
         if iter_num == 0 and eval_only:
             break
 
