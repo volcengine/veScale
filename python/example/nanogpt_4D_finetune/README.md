@@ -17,9 +17,17 @@ cd data/shakespeare && python3 prepare.py
 
 Then, to finetune the Shakespeare dataset in an environment of multiple GPUs, run
 ```
-torchrun --standalone --nproc_per_node={Number of GPUs} finetune_4D.py config/finetune_shakespeare.py --compile=False --dp_size={DP Size} --tp_size={TP Size}
+torchrun --standalone --nproc_per_node={Number of GPUs} finetune_4D.py config/finetune_shakespeare.py --compile=False --dp_size={DP Size} --tp_size={TP Size} --save_checkpoint_path={path to save checkpoints} 
 ```
-where `DP Size` and `TP Size` denote the the degrees of Data and Tensor Parallelism that suit your environment.
+where `DP Size` and `TP Size` denote the the degrees of Data and Tensor Parallelism that suit your environment, `save_checkpoint_path` is path to save checkpoints during the training.  
+
+If you want to resume training from a checkpoint, add `--load_checkpoint_path={path to load checkpoint}` in the command.
+
+For example:
+```
+torchrun --standalone --nproc_per_node={Number of GPUs} finetune_4D.py config/finetune_shakespeare.py --compile=False --dp_size={DP Size} --tp_size={TP Size} --save_checkpoint_path=./nanogpt_checkpoint_dir  --load_checkpoint_path=./nanogpt_checkpoint_dir/iter_5
+```
+
 
 To produce the single GPU result, run
 ```
@@ -53,4 +61,4 @@ For the bf16 runs, in `base_train.py`, instead of using `torch.amp.autocast`, we
 
 2. veScale does not focus on fp16, as fp16 is ancient in industry.
 
-3. Checkpointing is not supported.
+3. Checkpointing is supported now.

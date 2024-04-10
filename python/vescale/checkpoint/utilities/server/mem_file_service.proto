@@ -1,0 +1,72 @@
+// Run
+//
+// python -m grpc_tools.protoc -I.  --python_out=. --pyi_out=. \
+// --grpc_python_out=. ./omnistore/utilities/server/mem_file_service.proto
+//
+// to generate new protos.
+
+syntax = "proto3";
+
+message OmniStoreWriteRequest {
+  bytes content = 1;
+
+  string name = 8;
+}
+
+message OmniStoreWriteResponse {
+}
+
+message OmniStoreReadRequest {
+  string name = 1;
+}
+
+message OmniStoreReadResponse {
+  bytes content = 1;
+}
+
+message OmniStoreRenameRequest {
+  string src = 1;
+  string dst = 2;
+  bool overwrite = 3;
+}
+
+message OmniStoreRenameResponse {
+}
+
+message OmniStoreRemoveRequest {
+  string name = 1;
+}
+
+message OmniStoreRemoveResponse {
+}
+
+message OmniStoreListdirRequest {
+  string name = 1;
+}
+
+message OmniStoreListdirResponse {
+  repeated string names = 1;
+}
+
+message OmniStoreExistsRequest {
+  string name = 1;
+}
+
+message OmniStoreExistsResponse {
+  bool exists = 1;
+}
+
+service OmniStoreMemFileService {
+  rpc Write(stream OmniStoreWriteRequest) returns (OmniStoreWriteResponse) {
+  }
+  rpc Read(OmniStoreReadRequest) returns (stream OmniStoreReadResponse) {
+  }
+  rpc Rename(OmniStoreRenameRequest) returns (OmniStoreRenameResponse) {
+  }
+  rpc Remove(OmniStoreRemoveRequest) returns (OmniStoreRemoveResponse) {
+  }
+  rpc Listdir(OmniStoreListdirRequest) returns (OmniStoreListdirResponse) {
+  }
+  rpc Exists(OmniStoreExistsRequest) returns (OmniStoreExistsResponse) {
+  }
+}

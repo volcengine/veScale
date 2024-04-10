@@ -1,0 +1,49 @@
+// Run
+//
+// python -m grpc_tools.protoc -I.  --python_out=. --pyi_out=. \
+// --grpc_python_out=. ./omnistore/utilities/server/report_service.proto
+//
+// to generate new protos.
+
+syntax = "proto3";
+
+message OmniStoreGatherRequest {
+  // Used to distinguish different tasks.
+  string tag = 1;
+  int32 rank = 2;
+  bytes content = 3;
+  bool with_result = 4;
+}
+
+message OmniStoreGatherResponse {
+  repeated bytes contents = 1;
+}
+
+message OmniStoreBroadcastRequest {
+  string tag = 1;
+  int32 rank = 2;
+  bytes content = 3;
+  int32 src_rank = 4;
+}
+
+message OmniStoreBroadcastResponse {
+  bytes content = 1;
+}
+
+message OmniStoreGetStatusRequest {
+}
+
+message OmniStoreGetStatusResponse {
+  bytes status = 1;
+}
+
+service OmniStoreReportService {
+  rpc Gather(OmniStoreGatherRequest) returns (OmniStoreGatherResponse) {
+  }
+
+  rpc Broadcast(OmniStoreBroadcastRequest) returns (OmniStoreBroadcastResponse) {
+  }
+
+  rpc GetStatus(OmniStoreGetStatusRequest) returns (OmniStoreGetStatusResponse) {
+  }
+}

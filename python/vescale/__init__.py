@@ -25,6 +25,7 @@ import functools
 
 import torch
 import torch.utils._pytree as pytree
+import vescale.checkpoint as checkpoint
 from vescale.dmodule.api import parallelize_module, is_dmodule, PlacementsInterface
 from vescale.dtensor.api import normalize_placements, distribute_tensor, from_local, redistribute_dtensor, to_local
 from vescale.dtensor.device_mesh import DeviceMesh, init_device_mesh
@@ -44,6 +45,7 @@ __all__ = [
     "set_plan_overriding_policy",
     "get_plan_overriding_policy",
     "auto_parallelize_module",
+    "checkpoint",
     "DTensor",
     "DeviceMesh",
     "init_device_mesh",
