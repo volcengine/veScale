@@ -33,7 +33,7 @@ class BaseCheckpointer:
                               - Model: Identified by 'model' key, value should be a model instance.
                               - Optimizer: Identified by 'optimizer' key, value should be an optimizer instance.
         """
-        pass
+        raise NotImplementedError()
 
     def load(cls, path: str, checkpoint_state: CheckpointState):
         """
@@ -44,4 +44,4 @@ class BaseCheckpointer:
                               - Model: Identified by 'model' key, value should be a model instance.
                               - Optimizer: Identified by 'optimizer' key, value should be an optimizer instance.
         """
-        pass
+        raise NotImplementedError()
