@@ -116,7 +116,6 @@ class DistributedDataParallel(torch.nn.Module):
         param_to_name = {}
         for name, param in self.module.named_parameters():
             if param.requires_grad:
-                param.grad_added_to_main_grad = False
                 param_to_name[param] = name
                 dtype = torch.float if accumulate_allreduce_grads_in_fp32 else param.dtype
 
@@ -145,7 +144,6 @@ class DistributedDataParallel(torch.nn.Module):
         # NOTE: maybe we shoule handle these code later when we need MOE parallel.
         for param in self.module.parameters():
             if param.requires_grad and not getattr(param, "allreduce", True):
-                param.grad_added_to_main_grad = False
                 dtype = torch.float if accumulate_allreduce_grads_in_fp32 else param.dtype
                 param.main_grad = torch.zeros(
                     param.data.shape,
@@ -187,12 +185,8 @@ class DistributedDataParallel(torch.nn.Module):
             if param.requires_grad:
                 if self.overlap_grad_reduce:
                     assert param.grad is not None, "param.grad being None is not safe when overlap_grad_reduce is True"
-                # NOTE: it seems that there are some place where grad_added_to_main_grad is True.
-                # what will happen then?
-
-                # TODO: remove grad_added_to_main_grad attribute.
                 model_parallel_device_mesh, placements = None, None
-                if param.grad is not None and not param.grad_added_to_main_grad:
+                if param.grad is not None:
                     if isinstance(param.data, DTensor):
                         param.main_grad.add_(param.grad._local_tensor.data)  # add DTensor's data
                         model_parallel_device_mesh = param.grad._spec.mesh
@@ -248,9 +242,6 @@ class DistributedDataParallel(torch.nn.Module):
 
         When zero_buffer is set to True, the underlying grad buffer is zeroed out.
         """
-        for param in self.module.parameters():
-            if param.requires_grad:
-                param.grad_added_to_main_grad = False
         for grad_buffer in self.grad_buffers.values():
             grad_buffer.reset(zero_buffer)
         for expert_grad in self.expert_grads:

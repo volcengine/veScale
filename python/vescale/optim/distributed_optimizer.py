@@ -139,6 +139,8 @@ class DistributedOptimizer(OptimizerBase):
             that clipping is ignored if clip_grad == 0.
         overlap_param_gather: whether overlaping parameter all gathering with
             forward. By default, False.
+        grad_to_fp32: whether casting both the gradients and the optimizer
+            states to fp32. By default, True.
         optimizer_kwargs: used to initialize base optimizer instance when class
             is provided for `optimizer` argument. By default, None.
 
@@ -179,6 +181,7 @@ class DistributedOptimizer(OptimizerBase):
         models: Sequence[DDP],
         clip_grad: float = 0.0,
         overlap_param_gather: bool = False,
+        grad_to_fp32: bool = True,
         optimizer_kwargs: Dict[str, Any] = None,
         **kwargs,
     ):
@@ -214,9 +217,7 @@ class DistributedOptimizer(OptimizerBase):
             elif self.data_parallel_group != m.data_parallel_group:
                 raise RuntimeError("Detect model chunks of warious data-parallel process groups")
         if not all(x.use_distributed_optimizer for x in models):
-            print(
-                "You are using a distributed optimizer, it's suggested to set use_distributed_optimizer on for better performance"
-            )
+            raise ValueError("Please open `use_distributed_optimizer` in DDP initialization for better performance.")
 
         param_dtype_cnt = {}
         main_param_dtype_cnt = 0
@@ -241,6 +242,7 @@ class DistributedOptimizer(OptimizerBase):
         self.clip_grad = clip_grad
 
         self.overlap_param_gather = overlap_param_gather
+        self.grad_to_fp32 = grad_to_fp32
 
         # Model parameter sharding info for omnistore checkpointing
         self.param_to_name = {}
@@ -270,7 +272,7 @@ class DistributedOptimizer(OptimizerBase):
         self.param_across_dp_ranks_info = {}
         # Mapping fp32 master weights and original fp16 weights
         # for mix percision training
-        self.param_to_origin_param_for_shard_fp32_from_float16_groups = {}
+        self.param_to_origin_param_for_shard_casted_float16_groups = {}
 
         for model_chunk in self.models:
             self.per_bucket_numel.append(
@@ -294,7 +296,7 @@ class DistributedOptimizer(OptimizerBase):
             self.model_fp32_groups,
             self.shard_float16_groups,
             self.shard_fp32_groups,
-            self.shard_fp32_from_float16_groups,
+            self.shard_casted_float16_groups,
         ) = self.build_model_and_main_param_groups(
             self.model_gbuf_ranges, self.model_param_gbuf_map, self.opt_group_ranges
         )
@@ -374,6 +376,9 @@ class DistributedOptimizer(OptimizerBase):
         #   recast preexisting per-param state tensors.
         self.optimizer.param_groups = [g["orig_group"] for g in self.opt_group_ranges]
         self.optimizer.load_state_dict(self.optimizer.state_dict())
+
+        # A flag indicates whether the `step` has been called. It will be reset after invoking `zero_grad`.
+        self.step_issued = False
 
     def build_param_sharding_info_for_checkpoint(self, model: DDP, dtype, gbuf_world_all_ranges):
         param_world_index_map = model.grad_buffer_param_index_map[dtype]
@@ -610,12 +615,12 @@ class DistributedOptimizer(OptimizerBase):
         #   model_fp32_groups: original fp32 parameters
         #   shard_float16_groups: shards of original float16 parameters
         #   shard_fp32_groups: shards of original fp32 parameters
-        #   shard_fp32_from_float16_groups: fp32 copy of float16 parameters
+        #   shard_casted_float16_groups: fp32 copy of float16 parameters if cast_shard_param_to_fp32, otherwise, they are just copies
         model_float16_groups = []
         model_fp32_groups = []
         shard_float16_groups = []
         shard_fp32_groups = []
-        shard_fp32_from_float16_groups = []
+        shard_casted_float16_groups = []
 
         # Allocate (or slice) each group's param shard.
         for group_index, group_range in enumerate(opt_group_ranges):
@@ -624,12 +629,12 @@ class DistributedOptimizer(OptimizerBase):
             model_fp32_params_this_group = []
             shard_float16_params_this_group = []
             shard_fp32_params_this_group = []
-            shard_fp32_from_float16_params_this_group = []
+            shard_casted_float16_params_this_group = []
             model_float16_groups.append(model_float16_params_this_group)
             model_fp32_groups.append(model_fp32_params_this_group)
             shard_float16_groups.append(shard_float16_params_this_group)
             shard_fp32_groups.append(shard_fp32_params_this_group)
-            shard_fp32_from_float16_groups.append(shard_fp32_from_float16_params_this_group)
+            shard_casted_float16_groups.append(shard_casted_float16_params_this_group)
 
             for model_param in group_range["params"]:
                 assert model_param.requires_grad
@@ -648,7 +653,10 @@ class DistributedOptimizer(OptimizerBase):
                         model_param if not isinstance(model_param, DTensor) else model_param._local_tensor
                     )
                     shard_model_param = model_param_tensor.detach().view(-1)[param_range.start : param_range.end]
-                    shard_main_param = shard_model_param.clone().float()
+                    if self.grad_to_fp32:
+                        shard_main_param = shard_model_param.clone().float()
+                    else:
+                        shard_main_param = shard_model_param.clone()
                     # copy sharded info from DTensor
                     shard_model_param._spec = None if not isinstance(model_param, DTensor) else model_param._spec
                     if hasattr(model_param, "shared"):
@@ -662,8 +670,8 @@ class DistributedOptimizer(OptimizerBase):
                     # Add to group.
                     model_float16_params_this_group.append(model_param)
                     shard_float16_params_this_group.append(shard_model_param)
-                    shard_fp32_from_float16_params_this_group.append(shard_main_param)
-                    self.param_to_origin_param_for_shard_fp32_from_float16_groups[shard_main_param] = model_param
+                    shard_casted_float16_params_this_group.append(shard_main_param)
+                    self.param_to_origin_param_for_shard_casted_float16_groups[shard_main_param] = model_param
                 # fp32 params.
                 elif model_param.type() == "torch.cuda.FloatTensor":
                     model_param_tensor = (
@@ -692,7 +700,7 @@ class DistributedOptimizer(OptimizerBase):
             # changing group_range will implicitly change self.optimzer.param_groups.
             group_range["orig_group"]["params"] = [
                 *shard_fp32_params_this_group,
-                *shard_fp32_from_float16_params_this_group,
+                *shard_casted_float16_params_this_group,
             ]
 
         return (
@@ -700,7 +708,7 @@ class DistributedOptimizer(OptimizerBase):
             model_fp32_groups,
             shard_float16_groups,
             shard_fp32_groups,
-            shard_fp32_from_float16_groups,
+            shard_casted_float16_groups,
         )
 
     def get_model_param_range_map(self, param):
@@ -768,12 +776,13 @@ class DistributedOptimizer(OptimizerBase):
                         self.param_across_dp_ranks_info.get(param),
                     )
         # If it is mix percision training, we should save master fp32 weights
-        if not all(not group for group in self.shard_fp32_from_float16_groups):
-            for group in self.shard_fp32_from_float16_groups:
+        if not all(not group for group in self.shard_casted_float16_groups):
+            for group in self.shard_casted_float16_groups:
                 for param in group:
-                    original_param = self.param_to_origin_param_for_shard_fp32_from_float16_groups[param]
+                    original_param = self.param_to_origin_param_for_shard_casted_float16_groups[param]
                     name = self.param_to_name[original_param]
-                    distributed_state[torch.float32][name]["shard_fp32_from_float16_groups"] = OptimizerStateSpec(
+                    dtype = torch.float32 if self.grad_to_fp32 else param.dtype
+                    distributed_state[dtype][name]["shard_casted_float16_groups"] = OptimizerStateSpec(
                         self.param_global_shape_info[original_param],
                         self.param_local_shape_info[original_param],
                         self.param_global_offset_info[original_param],
@@ -825,14 +834,15 @@ class DistributedOptimizer(OptimizerBase):
 
         self.optimizer.load_state_dict(optimizer_state)
 
-        if not all(not group for group in self.shard_fp32_from_float16_groups):
-            for group in self.shard_fp32_from_float16_groups:
+        if not all(not group for group in self.shard_casted_float16_groups):
+            for group in self.shard_casted_float16_groups:
                 for param in group:
-                    original_param = self.param_to_origin_param_for_shard_fp32_from_float16_groups[param]
+                    original_param = self.param_to_origin_param_for_shard_casted_float16_groups[param]
                     name = self.param_to_name[original_param]
                     # The weights have been flatten into 1D and get range based on current rank (if necessary)
                     # in the "resume optimizer state loop
-                    param.copy_(state_dict[torch.float32][name]["shard_fp32_from_float16_groups"])
+                    dtype = torch.float32 if self.grad_to_fp32 else param.dtype
+                    param.copy_(state_dict[dtype][name]["shard_casted_float16_groups"])
         # state_dict['shard_fp32_from_float16_groups']
         # optimizer_state['shard_fp32_from_float16_groups']
         # TODO: Copy data for the main params.
@@ -860,7 +870,7 @@ class DistributedOptimizer(OptimizerBase):
             self.model_fp32_groups,
             self.shard_float16_groups,  # grad empty/unused here?
             self.shard_fp32_groups,  # throws grad-access warning
-            self.shard_fp32_from_float16_groups,
+            self.shard_casted_float16_groups,
         ):
             for group in groups:
                 _zero_grad_group_helper(group, set_to_none)
@@ -877,8 +887,11 @@ class DistributedOptimizer(OptimizerBase):
         # pre-hook when this all-gather finishes (to ensure that the communication
         # kernels don't head-of-line block the compute kernels since we run with
         # CUDA_DEVICE_MAX_CONNECTIONS=1 to support sequence parallelism).
-        if self.overlap_param_gather:
+        # NOTE: we shouldn't issue param all-gather if runned before any `optim.step`.
+        if self.overlap_param_gather and self.step_issued:
             self._dispatch_gather_model_params(all_gather_handle_index=0)
+
+        self.step_issued = False
 
     def shard_buffer_among_dp_world(self, buffer: torch.Tensor):
         assert buffer.numel() % self.data_parallel_world_size == 0
@@ -1096,7 +1109,7 @@ class DistributedOptimizer(OptimizerBase):
         """
         model_data = []
         main_data = []
-        for model_group, main_group in zip(self.shard_float16_groups, self.shard_fp32_from_float16_groups):
+        for model_group, main_group in zip(self.shard_float16_groups, self.shard_casted_float16_groups):
             for model_param, main_param in zip(model_group, main_group):
                 model_data.append(model_param.data)
                 main_data.append(main_param.data)
@@ -1121,10 +1134,13 @@ class DistributedOptimizer(OptimizerBase):
 
                     model_grad = model_param.main_grad
                     shard_model_grad = model_grad.view(-1)[param_range.start : param_range.end]
-                    shard_main_param.grad = shard_model_grad.float()
+                    if self.grad_to_fp32:
+                        shard_main_param.grad = shard_model_grad.float()
+                    else:
+                        shard_main_param.grad = shard_model_grad
 
         # Copy model groups to shard groups.
-        copy_group_grads(self.model_float16_groups, self.shard_fp32_from_float16_groups)
+        copy_group_grads(self.model_float16_groups, self.shard_casted_float16_groups)
         copy_group_grads(self.model_fp32_groups, self.shard_fp32_groups)
 
     def _copy_main_params_to_model_params(self):
@@ -1153,7 +1169,7 @@ class DistributedOptimizer(OptimizerBase):
                     shard_model_param.data.copy_(shard_main_param)
 
         # Copy shard groups to model groups.
-        copy_group_params(self.shard_fp32_from_float16_groups, self.model_float16_groups)
+        copy_group_params(self.shard_casted_float16_groups, self.model_float16_groups)
         copy_group_params(self.shard_fp32_groups, self.model_fp32_groups)
 
     def _copy_model_params_to_main_params(self):
@@ -1177,7 +1193,7 @@ class DistributedOptimizer(OptimizerBase):
                     shard_main_param.data.copy_(shard_model_param)
 
         # Copy model groups to shard groups.
-        copy_group_params(self.model_float16_groups, self.shard_fp32_from_float16_groups)
+        copy_group_params(self.model_float16_groups, self.shard_casted_float16_groups)
         copy_group_params(self.model_fp32_groups, self.shard_fp32_groups)
 
     def clip_grad_norm(self, clip_grad):
@@ -1217,6 +1233,7 @@ class DistributedOptimizer(OptimizerBase):
             for all_gather_handle_index in range(self.num_all_gather_handles):
                 self._dispatch_gather_model_params(all_gather_handle_index)
 
+        self.step_issued = True
         return grad_norm
 
     def get_parameters(self):

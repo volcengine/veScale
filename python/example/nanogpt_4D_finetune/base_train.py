@@ -44,7 +44,6 @@ import os
 import time
 import math
 import pickle
-from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -138,7 +137,6 @@ torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
-ctx = nullcontext() if device_type == "cpu" else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 # poor man's data loader
 data_dir = os.path.join("data", dataset)
@@ -227,9 +225,7 @@ if block_size < model.config.block_size:
     model.crop_block_size(block_size)
     model_args["block_size"] = block_size  # so that the checkpoint will have the right value
 model.to(device)
-
-# initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+model.to(ptdtype)
 
 # optimizer
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
@@ -258,8 +254,7 @@ def estimate_loss():
         losses = torch.zeros(eval_iters // factor).to(device)
         for k in range(eval_iters // factor):
             X, Y = get_batch(split, batch_size * factor, local_batch_size * factor)
-            with ctx:
-                logits, loss = model(X, Y)
+            logits, loss = model(X, Y)
             losses[k] = loss.item() / ddp_world_size
         if ddp:
             all_reduce(losses)
@@ -345,20 +340,17 @@ while True:
             # I really dislike that this bloats the code and forces us to repeat code
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = micro_step == gradient_accumulation_steps - 1
-        with ctx:
-            logits, loss = model(X, Y)
-            loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
+        logits, loss = model(X, Y)
+        loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch("train")
         # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
+        loss.backward()
     # clip the gradient
     if grad_clip != 0.0:
-        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-    # step the optimizer and scaler if training in fp16
-    scaler.step(optimizer)
-    scaler.update()
+    # step the optimizer
+    optimizer.step()
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 

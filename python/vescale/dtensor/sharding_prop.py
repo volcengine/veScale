@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Callable, Dict, Optional, Sequence, Union, cast, List
 
 import torch
+import copy
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 
@@ -39,6 +40,7 @@ recompute_tensor_meta_list = [
     aten.native_dropout.default,
     # aten.native_layer_norm.default,
     aten.nll_loss_forward.default,
+    aten.topk.default,
 ]
 
 
@@ -259,7 +261,7 @@ class ShardingPropagator:
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     output_strategy = self._select_strategy(strategy)
-                    out_spec_list.append(output_strategy.output_spec)
+                    out_spec_list.append(copy.deepcopy(output_strategy.output_spec))
                     if output_strategy.output_spec is None:
                         fallback_prop = True
 

@@ -478,6 +478,29 @@ class DistTensorOpsTest(DTensorTestBase):
         dx = torch.stack(dx)
         # torch.autograd.backward(dout, torch.ones_like(dout))
 
+    @with_comms
+    def test_nonzero(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.randint(0, 1, (4, 5, 6))
+        out = torch.nonzero(x)
+
+        d_x = distribute_tensor(x, device_mesh, [Replicate()])
+        d_out = torch.nonzero(d_x)
+
+        self.assertEqual(d_out.to_local(), out)
+        self.assertEqual(d_out.size(), d_out._local_tensor.size())
+
+    @with_comms
+    def test_unbind(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.randint(0, 1, (4, 5, 6))
+        d_x = distribute_tensor(x, device_mesh, [Replicate()])
+        for dim in range(3):
+            out = torch.unbind(x, dim)
+            d_out = torch.unbind(d_x, dim)
+            for d_r, r in zip(d_out, out):
+                self.assertEqual(d_r.to_local(), r)
+
 
 if __name__ == "__main__":
     run_tests()

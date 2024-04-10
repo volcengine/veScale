@@ -271,6 +271,7 @@ def main():
                 models=[model],
                 clip_grad=grad_clip,
                 overlap_param_gather=False,
+                grad_to_fp32=DDP_grads_in_fp32,
             )
         elif ddp:
             optimizer = BasicOptimizer(base_optimizer, models=model, grad_hook=GradOptimizerHookBase)

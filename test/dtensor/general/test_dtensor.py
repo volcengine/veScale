@@ -13,7 +13,6 @@ from common_dtensor import DTensorTestBase, with_comms
 
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.testing._internal.common_utils import run_tests
@@ -21,24 +20,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 from vescale import DeviceMesh, DTensor, distribute_tensor
 from vescale.dtensor.placement_types import Partial, Replicate, Shard
-
-
-class DummyMLP(torch.nn.Module):
-    def __init__(self, device):
-        super().__init__()
-        self.net1 = torch.nn.Linear(5, 1024, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(1024, 4, device=device)
-
-    def forward(self, x):
-        return self.net2(F.relu(self.net1(x)))
-
-    def reset_parameters(self, *args, **kwargs):
-        with torch.no_grad():
-            self.net1.weight.fill_(0.5)
-            self.net2.weight.fill_(1)
-            self.net1.bias.fill_(1.5)
-            self.net2.bias.fill_(1.2)
 
 
 class DTensorTest(DTensorTestBase):

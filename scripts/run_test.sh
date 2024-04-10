@@ -17,7 +17,7 @@ export PYTHONPATH
 
 # run test
 while IFS= read -r -d '' file
-do  
+do
     pkill -9 python3 || true # ok if nothing to kill
     pytest -s "${file}"
     pkill -9 python3 || true

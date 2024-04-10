@@ -29,7 +29,7 @@ eval_iters = 5
 dataset = "shakespeare"
 init_from = "gpt2"  # this is the smallest GPT-2 model
 
-wandb_log = True  # feel free to turn on
+wandb_log = False  # feel free to turn on
 wandb_project = f"{init_from}_finetune_{dataset}"
 
 # only save checkpoints if the validation loss improves
