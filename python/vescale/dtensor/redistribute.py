@@ -326,7 +326,7 @@ def redistribute_local_tensor(
                 )
                 new_local_tensor = shards[my_coordinate[i]].clone()
             else:
-                # FIXME(wujiawei.aml): for now, we don't support conversion
+                # FIXME: for now, we don't support conversion
                 # between InterleavedShard and Shard. Maybe we should provide
                 # a method to transfer InterleavedShard to a contiguous Shard?
                 raise NotImplementedError("Redistributiom from Shard to InterleavedShard is not supported")

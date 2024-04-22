@@ -179,7 +179,7 @@ class BasicOptimizer(OptimizerBase):
             if isinstance(m, DDP):
                 continue
             if not DModule.is_dmodule(m):
-                logging.warning("module has no `finish_grad_sync` method defined, skip allreducing grads")
+                logging.warning("module has no `finish_grad_sync` method defined, skip all-reducing grads")
                 continue
             m.finish_grad_sync()
         return self.optimizer.step(closure)

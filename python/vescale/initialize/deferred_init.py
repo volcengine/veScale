@@ -14,9 +14,14 @@ from typing import Dict, Optional, Sequence, Tuple, Union, Any, Callable
 import torch
 from torch import nn
 
-from torchdistx.deferred_init import deferred_init as _deferred_init
-from torchdistx.deferred_init import is_deferred as _is_deferred
-from torchdistx.deferred_init import _C
+try:
+    from torchdistx.deferred_init import deferred_init as _deferred_init
+    from torchdistx.deferred_init import is_deferred as _is_deferred
+    from torchdistx.deferred_init import _C
+
+    IMPORT_DEFER = True
+except:  # noqa: E722
+    IMPORT_DEFER = False
 
 from vescale.dtensor.device_mesh import DeviceMesh
 import vescale.dtensor.random as random
@@ -60,6 +65,9 @@ def is_deferred(obj: Union[torch.Tensor, nn.Parameter, nn.Module]) -> bool:
         obj:
             A ``torch.Tensor`` or ``nn.Parameter`` or ``nn.Module`` instance.
     """
+    if not IMPORT_DEFER:
+        return False
+
     if isinstance(obj, DTensor):
         warnings.warn(
             "`is_deferred` takes a `DTensor`! deferring a `DTensor` itself might be not supported.", UserWarning
@@ -214,7 +222,6 @@ def _materialize_dmodule(
     param_sharding_plan: Optional[Dict[str, Any]] = None,
     fwd_resharding_plan: Optional[Dict[str, Any]] = None,
     is_model_sharded: bool = False,
-    grad_sync: Union[bool, Dict] = False,
     # TODO: enable selective materialize in future
     buffers_only: bool = False,
     check_fn: Optional[Callable[[nn.Module], bool]] = None,
@@ -230,5 +237,4 @@ def _materialize_dmodule(
         param_sharding_plan,
         fwd_resharding_plan,
         is_model_sharded,
-        grad_sync,
     )

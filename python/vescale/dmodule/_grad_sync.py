@@ -21,40 +21,39 @@
 """This file handles gradient allreduce for DModule with no DDP
 
 NOTE:
-- `generate_grad_sync_list` is not recommended to be placed into a param.grad pre-hook, because:
+- `get_partial_gradients` is not recommended to be placed into a param.grad pre-hook, because:
     i) having multiple hooks on param.grad complicates the design and debugging
     ii) gradient accumlation will repeatedly fire param.grad pre-hook, degrading performance
 
 """
 
-from typing import List, Tuple, Union
+from typing import List
 
 import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
-from torch import Tensor
 
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.placement_types import DTensorSpec, Replicate
 from vescale.dtensor.device_mesh import DeviceMesh
 
-__all__ = ["generate_grad_sync_list", "sync_gradients"]
+__all__ = ["get_partial_gradients", "sync_gradients"]
 
 
-def generate_grad_sync_list(candidate: List[Tuple[str, DTensor]]) -> List[Tuple[str, Union[Tensor, DTensor]]]:
-    """obtain Partial gradient list from the candiate list."""
-    grad_sync_list = []
-    for fqn, param in candidate:
+def get_partial_gradients(module: torch.nn.Module, candidate_params: List[str]) -> List[DTensor]:
+    """filter out Partial gradient list from the candiate param list."""
+    gradients = []
+    for param_name in candidate_params:
+        param = module.get_parameter(param_name)
         assert param.requires_grad
         assert isinstance(param.data, DTensor)
         assert hasattr(param, "grad")
         if param.grad is None:
             continue
         placements = param.grad.placements
-        fqn += ".grad"
         grad = param.grad
         if any(p.is_partial() for p in placements):
-            grad_sync_list.append((fqn, grad))
-    return grad_sync_list
+            gradients.append((param_name, grad))
+    return gradients
 
 
 @torch.no_grad()
@@ -102,17 +101,17 @@ def _allreduce_by_bucket(
                 buf.copy_(synced)
 
 
-def sync_gradients(grad_sync_list: List[Tuple[str, Union[Tensor, DTensor]]], device_mesh: DeviceMesh) -> None:
+def sync_gradients(param_partial_grads: List[DTensor], device_mesh: DeviceMesh) -> None:
     r"""
-    AllReduce-Sum all gradients of Partial (given by `grad_sync_list`) on device_mesh.
+    AllReduce-Sum all gradients of Partial (given by `param_partial_grads`) on device_mesh.
     """
-    if not grad_sync_list:
+    if not param_partial_grads:
         return
 
     # get local tensors to allreduce + get process group to allreduce
     local_gradients = []
     partial_mesh_idxes = set()
-    for _, grad in grad_sync_list:
+    for _, grad in param_partial_grads:
         local_gradients.append(grad._local_tensor)
         partial_mesh_idxes.update([i for i, p in enumerate(grad._spec.placements) if p.is_partial()])
     assert len(partial_mesh_idxes) == 1, "currently, we only consider a single Partial on the same mesh dim."
@@ -122,6 +121,6 @@ def sync_gradients(grad_sync_list: List[Tuple[str, Union[Tensor, DTensor]]], dev
     _allreduce_by_bucket(local_gradients, partial_pg)
 
     # change DTensor gradients from partial to replicate placement
-    for fqn, grad in grad_sync_list:
+    for _, grad in param_partial_grads:
         new_placements = [Replicate() if p.is_partial() else p for p in grad._spec.placements]
         grad._spec = DTensorSpec(grad._spec.mesh, tuple(new_placements), grad._spec.tensor_meta)

@@ -30,11 +30,11 @@ import inspect
 
 import numpy as np
 import torch
-from torch.distributed import broadcast, all_reduce, barrier, init_process_group, destroy_process_group
+from torch.distributed import broadcast, all_reduce, barrier, init_process_group, destroy_process_group, get_rank
 
 from model import GPTConfig, GPT
+from vescale.devicemesh_api.device_mesh_api import veDeviceMesh
 
-from vescale.dtensor.device_mesh import init_device_mesh
 from vescale import distribute_tensor
 from vescale.dmodule.api import parallelize_module
 from vescale.dtensor.placement_types import Replicate
@@ -113,8 +113,9 @@ def main():
         device = f"cuda:{rank}"
         torch.cuda.set_device(device)
         init_process_group(backend=backend, world_size=world_size, rank=rank)
-        mesh = init_device_mesh(device, (dp_size, tp_size), mesh_dim_names=["DP", "TP"])
-        ddp_rank = mesh.get_rank() // tp_size
+
+        mesh = veDeviceMesh.init_device_mesh(device, (dp_size, tp_size), mesh_dim_names=["DP", "TP"])
+        ddp_rank = get_rank() // tp_size
     else:
         rank = 0
         ddp_rank = 0
@@ -329,8 +330,7 @@ def main():
     # Load checkpoint
     if load_checkpoint_path:
         checkpoint_state = {"model": model, "optimizer": optimizer}
-        with mesh:
-            vescale.checkpoint.load(load_checkpoint_path, checkpoint_state)
+        vescale.checkpoint.load(load_checkpoint_path, checkpoint_state)
     # training loop
     X, Y = get_batch("train")  # fetch the very first batch
     t0 = time.time()
@@ -363,8 +363,7 @@ def main():
                 # When iter_num == 0, the training does not start sotoptimizer state is empty,
                 # Don't save checkpoint
                 checkpoint_state = {"model": model, "optimizer": optimizer}
-                with mesh:
-                    vescale.checkpoint.save(os.path.join(save_checkpoint_path, f"iter_{iter_num}"), checkpoint_state)
+                vescale.checkpoint.save(os.path.join(save_checkpoint_path, f"iter_{iter_num}"), checkpoint_state)
         if iter_num == 0 and eval_only:
             break
 

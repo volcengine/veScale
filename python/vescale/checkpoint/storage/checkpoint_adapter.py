@@ -125,7 +125,7 @@ def _get_megatron_tp_group(world_size, pp_size, tp_size, dp_size, cur_rank) -> t
 
 def _deduce_parallel_plan_by_device_mesh(mesh: DeviceMesh):
     """make rank to megatron tp_rank, pp_rank map"""
-    # FIXME(cery.69) : current only support data parallel is 1
+    # FIXME : current only support data parallel is 1
     # allways parallel in last dim
     tp_size = mesh.size()
     # for rank = pp_rank * tp_size + tp_rank
@@ -261,7 +261,7 @@ def convert_vescale_checkpoint_to_megatron(
             torch.save(optim, os.path.join(megatron_optim_dict_path, "optim.pt"))
             del st["optim"]
         torch.save(st, megatron_save_file)
-        # FIXME(cery.69): support dp not 1
+        # FIXME: support dp not 1
         return st
 
 

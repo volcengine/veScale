@@ -80,7 +80,7 @@ def _mm_like_strategy(mm_equation: str, mesh: DeviceMesh, op_schema: OpSchema) -
     assert isinstance(rhs, OpStrategy)
     mm_strategy = gen_einsum_strategies(mm_equation, mesh, lhs, rhs)
     # filter out invalid strategies and associate costs
-    # TODO(cery.zhai) add check here
+    # TODO add check here
     return mm_strategy
 
 

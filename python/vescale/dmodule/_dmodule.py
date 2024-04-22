@@ -338,6 +338,34 @@ class DModule:
                     param.register_hook(PostHookGrad.get_hook(module._device_mesh, weight_pi.grad))
 
     @staticmethod
+    def init_backward(module):
+        """
+        Register hooks to collect backward info. For example, we collect partial grad for all-reduce.
+        """
+        assert DModule.has_all_attributes(module)
+
+        module._grad_sync_list = []
+        module._installed_backward_hooks = []
+
+        def make_backward_hook(module, param_name):
+            def grad_hook(grad):
+                if param_name in module._grad_sync_list:
+                    return grad
+                if isinstance(grad.data, DTensor) and any(p.is_partial() for p in grad.data.placements):
+                    module._grad_sync_list.append(param_name)
+                return grad
+
+            return grad_hook
+
+        for param_name, param in module.named_parameters():
+            if not param.requires_grad:
+                continue
+            hook = param.register_hook(make_backward_hook(module, param_name))
+
+            # TODO: maybe we can remove these hooks once first backward is finihsed.
+            module._installed_backward_hooks.append(hook)
+
+    @staticmethod
     def post_patch_submodules(module: nn.Module) -> None:
         """Post patching specific submodules with implementation under `vescale.model.patch`.
         (DModule is generic module class and should NOT contain specific layers or ops.).
@@ -394,39 +422,6 @@ class DModule:
                 factory_pi = {f: p for f, p in factory_pi.items() if p is not None}
             wrap_factory_mode(submod, module._device_mesh, factory_pi)
 
-    @staticmethod
-    def prepare_grad_sync(module: nn.Module, grad_sync: Union[bool, Dict]) -> None:
-        """
-        parse the given `grad_sync` and prepare a list of candidiates for gradient sync.
-        """
-        assert DModule.has_all_attributes(module)
-
-        module._grad_sync_candidate = []
-        if not grad_sync:  # False or {}
-            return
-
-        def is_candidate(mod: nn.Module, pname: str) -> bool:
-            if grad_sync is True:
-                return True
-
-            for clss, pnames in grad_sync.items():
-                if type(mod) is not clss:
-                    continue
-                if not pnames:  # False or []
-                    continue
-                if pnames is True or pname in pnames:
-                    return True
-            return False
-
-        for submod_fqn, submod in module.named_modules():
-            for param_name, param in submod.named_parameters(recurse=False):
-                if not param.requires_grad:
-                    continue
-                if not isinstance(param.data, DTensor):
-                    continue
-                if is_candidate(submod, param_name):
-                    module._grad_sync_candidate.append((f"{submod_fqn}.{param_name}".lstrip("."), param))
-
     """ ============ Bound Methods Below ============ """
 
     @staticmethod
@@ -481,8 +476,8 @@ class DModule:
             return assgined_fwd_resharding_plan.get("weight", None)
 
     def start_grad_sync(self: nn.Module) -> None:
-        self._grad_sync_list = _grad_sync.generate_grad_sync_list(self._grad_sync_candidate)
-        _grad_sync.sync_gradients(self._grad_sync_list, self._device_mesh)
+        self._param_partial_grads = _grad_sync.get_partial_gradients(self, self._grad_sync_list)
+        _grad_sync.sync_gradients(self._param_partial_grads, self._device_mesh)
 
     def finish_grad_sync(self: nn.Module) -> None:
         # TODO: think about overlapping with backwarding
@@ -492,11 +487,11 @@ class DModule:
         """
         list which gradients are used for gradient sync.
         """
-        print("*** format: [(fqn, .main_grad or .grad on Partial)] ***")
-        for fqn, grad in self._grad_sync_list:
-            print(f"{fqn}:\t{grad._spec}")
-        print("*******************************************************")
-        return self._grad_sync_list
+        print("*** format: [(fqn, of which .grad is Partial)] ***")
+        for param_fqn, grad in self._param_partial_grads:
+            print(f"{param_fqn}:\t{grad._spec}")
+        print("**************************************************")
+        return self._param_partial_grads
 
     def repr_params(
         self: nn.Module, show_shape=True, show_type=True, show_shard=True, show_mesh=True, show_ltensor_shape=True

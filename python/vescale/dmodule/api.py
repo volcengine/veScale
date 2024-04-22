@@ -37,7 +37,6 @@ def parallelize_module(
     *,
     is_model_sharded: bool = False,
     factory: Union[bool, Dict[nn.Module, Union[bool, Dict]]] = False,
-    grad_sync: Union[bool, Dict] = True,
 ) -> nn.Module:
     r"""
     Parallelize this `nn.Module` instance by inplace converting its parameters/buffers/activations from Tensor to DTensor:
@@ -145,19 +144,6 @@ def parallelize_module(
                     - assumes same <sharding placements> for `factory_func`
                     - does NOT support nested `submodule_cls`
 
-        grad_sync (Optional): whether to turn on gradient synchronization (i.e., auto-allreduce `Partial` gradients) after backward pass.
-
-                    Format: `True` or `False` or `{ submodule_cls : (param_name1, param_name2, ...) }`
-                        - `True`: looking for all `submodule_cls` and all `param_names` whose `Partial` gradients will be allreduced.
-                        - `False` or `{}`: disable gradient synchronization
-                        - `{ submodule_cls : True }`: only looking for this `submodule_cls`'s all `param_name` for gradient synchronization.
-                        - `{ submodule_cls : False or [] }`: exclude this `submodule_cls` for gradient synchronization.
-                        - `{ submodule_cls : [param_name1] }`: only looking for this `submodule_cls`'s `param_name1` for gradient synchronization.
-
-                    Note:
-                    - If turned on, use `finish_grad_sync()` to wait for the gradient synchronization finish.
-                    - If using veScale's optimizer, `finish_grad_sync()` is automatic and doesn't require manual call.
-
     Returns:
         (Optional) this parallelized model instance
 
@@ -235,7 +221,7 @@ def parallelize_module(
     Example:: using gradient synchronization with customized target
 
         ...
-        dmlp = parallelize_module(model, ..., grad_sync={ nn.LayerNorm: ["weight"] })
+        dmlp = parallelize_module(model, ...})
         dmlp.finish_grad_sync()
         optimizer.step()
 
@@ -267,14 +253,14 @@ def parallelize_module(
     # install forward hooks
     DModule.init_forward(module)
 
+    # install backward hooks
+    DModule.init_backward(module)
+
     # post-patch submodules
     DModule.post_patch_submodules(module)
 
     # prepare dtensorizing factory
     DModule.prepare_factory(module, factory)
-
-    # prepare gradient sync
-    DModule.prepare_grad_sync(module, grad_sync)
 
     # tag this module as parallelized dmodule
     DModule.set_dmodule(module)

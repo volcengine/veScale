@@ -62,7 +62,6 @@ class LNGradSyncTest(DTensorTestBase):
             m,
             device_mesh,
             {"parameter": param_sharding_plan, "forward": fwd_sharding_plan},
-            grad_sync={torch.nn.LayerNorm: ["weight", "bias"]},
         )
 
         dx = distribute_tensor(torch.rand(BSZ, SEQ_LEN, HIDDEN_DIM), device_mesh, inout_sharding)
@@ -73,20 +72,8 @@ class LNGradSyncTest(DTensorTestBase):
         m.finish_grad_sync()
         self.assertTrue(len(m.list_grad_sync()) == 0)
 
-    @parametrize(
-        "grad_sync",
-        [
-            False,
-            True,
-            {},
-            {torch.nn.LayerNorm: []},
-            {torch.nn.LayerNorm: True},
-            {torch.nn.LayerNorm: ["weight", "bias"]},
-            {torch.nn.LayerNorm: ["weight"]},
-        ],
-    )
     @with_comms
-    def test_basic(self, grad_sync):
+    def test_basic(self):
         m = LN(HIDDEN_DIM)
 
         device_mesh = DeviceMesh(self.device_type, [0, 1, 2, 3])
@@ -100,7 +87,6 @@ class LNGradSyncTest(DTensorTestBase):
             m,
             device_mesh,
             {"parameter": param_sharding_plan, "forward": fwd_sharding_plan},
-            grad_sync=grad_sync,
         )
         optimizer = torch.optim.Adam(m.parameters(), lr=1e-3)
         optimizer = BasicOptimizer(optimizer, models=m, grad_hook=BasicOptimizerHook)
@@ -110,29 +96,16 @@ class LNGradSyncTest(DTensorTestBase):
         torch.autograd.backward(dout, torch.ones_like(dout))
         self.assertTrue(m.ln.weight.grad.placements[0].is_partial())
         self.assertTrue(m.ln.bias.grad.placements[0].is_partial())
-        # NOTE: now, we don't need to manually call ``m.finish_grad_sync()``, BasicOptimizer will
+        # NOTE: we don't need to manually call ``m.finish_grad_sync()``, BasicOptimizer will
         # implicitly do that.
         optimizer.step()
-        grad_sync_list = m.list_grad_sync()
-        fqn_sync_list = set([fqn for fqn, _ in grad_sync_list])  # noqa: C403
-        if grad_sync in (False, {}, {torch.nn.LayerNorm: []}):
-            self.assertTrue(len(grad_sync_list) == 0)
-            self.assertTrue(m.ln.weight.grad.placements[0].is_partial())
-            self.assertTrue(m.ln.bias.grad.placements[0].is_partial())
-        elif grad_sync in (True, {torch.nn.LayerNorm: True}, {torch.nn.LayerNorm: ["weight", "bias"]}):
-            self.assertTrue(len(grad_sync_list) == 2)
-            self.assertTrue("ln.weight.grad" in fqn_sync_list)
-            self.assertTrue("ln.bias.grad" in fqn_sync_list)
-            self.assertTrue(m.ln.weight.grad.placements[0].is_replicate())
-            self.assertTrue(m.ln.bias.grad.placements[0].is_replicate())
-        elif grad_sync in ({torch.nn.LayerNorm: ["weight"]},):
-            self.assertTrue(len(grad_sync_list) == 1)
-            self.assertTrue("ln.weight.grad" in fqn_sync_list)
-            self.assertTrue("ln.bias.grad" not in fqn_sync_list)
-            self.assertTrue(m.ln.weight.grad.placements[0].is_replicate())
-            self.assertTrue(m.ln.bias.grad.placements[0].is_partial())
-        else:
-            raise ValueError(f"Unknown grad_sync: {grad_sync}")
+        grad_sync_params = [x[0] for x in m.list_grad_sync()]
+
+        self.assertTrue(len(grad_sync_params) == 2)
+        self.assertTrue("ln.weight" in grad_sync_params)
+        self.assertTrue("ln.bias" in grad_sync_params)
+        self.assertTrue(m.ln.weight.grad.placements[0].is_replicate())
+        self.assertTrue(m.ln.bias.grad.placements[0].is_replicate())
 
     @parametrize("overlap_grad_reduce", [True, False])
     @parametrize("use_distributed_optimizer", [True, False])
@@ -192,7 +165,6 @@ class LNGradSyncTest(DTensorTestBase):
             m,
             tp_submesh,
             {"parameter": param_sharding_plan, "forward": fwd_sharding_plan},
-            grad_sync={torch.nn.LayerNorm: ["weight", "bias"]},
         )
 
         ddp_m = DDP(

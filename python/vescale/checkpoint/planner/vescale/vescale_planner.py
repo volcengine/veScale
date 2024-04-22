@@ -35,7 +35,7 @@ from .vescale_planner_helpers import (
     find_state_dict_object,
 )
 
-from vescale.dtensor.device_mesh import mesh_resources
+from vescale.devicemesh_api import veDeviceMesh
 
 logger: logging.Logger = logging.getLogger(__file__)
 
@@ -190,8 +190,6 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
     A function for creating local saving plan for saving checkpoint
     """
     requests = []
-    device_mesh = mesh_resources.get_current_mesh()
-    dp_device_mesh = device_mesh["DP"]
     for fqn, obj in state_dict.items():
         # Since DTensor supports submesh, adding extra check to ensure _create_write_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
@@ -232,7 +230,7 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                                 op=dist.irecv,
                                 tensor=recv_tensor,
                                 peer=k,
-                                group=dp_device_mesh.get_dim_groups(0),
+                                group=veDeviceMesh.get_data_parallel_dim_groups(),
                             )
                             recv_tensors[k] = recv_tensor
                             p2p_ops.append(recv_op)
@@ -243,7 +241,7 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                         op=dist.isend,
                         tensor=obj.local_tensor,
                         peer=writer_rank,
-                        group=dp_device_mesh.get_dim_groups(0),
+                        group=veDeviceMesh.get_data_parallel_dim_groups(),
                     )
                     p2p_ops.append(send_op)
 

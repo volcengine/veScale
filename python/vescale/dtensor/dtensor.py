@@ -295,6 +295,13 @@ class DTensor(torch.Tensor):
 
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
+
+        # separately handle fake/functional local_tensor which errors on data_ptr access.
+        try:
+            local_tensor_data_ptr = local_tensor.data_ptr()
+        except Exception:
+            local_tensor_data_ptr = None
+
         r = _dispatch_torch_make_wrapper_subclass(
             cls,
             shape,
@@ -303,7 +310,7 @@ class DTensor(torch.Tensor):
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
-            data_ptr=local_tensor.data_ptr(),
+            data_ptr=local_tensor_data_ptr,
         )
 
         tensor_meta = TensorMeta(shape, stride, dtype)

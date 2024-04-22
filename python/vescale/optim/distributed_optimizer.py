@@ -702,6 +702,30 @@ class DistributedOptimizer(OptimizerBase):
                 *shard_fp32_params_this_group,
                 *shard_casted_float16_params_this_group,
             ]
+            # update the param group map because group_range changes
+            fp32_param_num = len(model_fp32_params_this_group)
+            float16_param_idx = fp32_param_num  # float16 index starts after fp32 params
+            fp32_param_idx = 0
+            for model_param in group_range["params"]:
+                old_group_idx, old_param_idx = self.model_param_group_index_map[model_param]
+                assert old_group_idx == group_index
+                if model_param.type() in [
+                    "torch.cuda.HalfTensor",
+                    "torch.cuda.BFloat16Tensor",
+                ]:
+                    self.model_param_group_index_map[model_param] = (group_index, float16_param_idx)
+                    float16_param_idx += 1
+                elif model_param.type() == "torch.cuda.FloatTensor":
+                    self.model_param_group_index_map[model_param] = (group_index, fp32_param_idx)
+                    fp32_param_idx += 1
+                else:
+                    raise TypeError(
+                        "Wrapped parameters must be one of "
+                        "torch.cuda.FloatTensor,  "
+                        "torch.cuda.HalfTensor, or "
+                        "torch.cuda.BFloat16Tensor. "
+                        f"Received {model_param.type()}"
+                    )
 
         return (
             model_float16_groups,

@@ -18,7 +18,7 @@ import torch
 import torch.distributed as dist
 from common_dtensor import DTensorTestBase, with_comms, skip_unless_torch_gpu
 from torch.testing._internal.common_utils import run_tests
-from vescale.dtensor.device_mesh import mesh_resources
+from vescale.devicemesh_api.device_mesh_api import veDeviceMesh
 import vescale
 from vescale.dtensor.placement_types import Replicate
 
@@ -46,7 +46,16 @@ class TestNanoGPT1(DTensorTestBase):
         ddp_gpt, dist_optimizer, data_set = build_gpt_model_optimizer_and_dataset(
             self.init_method, dp_size=2, tp_size=2
         )
-        device_mesh = mesh_resources.get_current_mesh()
+
+        # turn off 'check_uniqueness' to allow multiple updates of global device mesh during runtime
+        device_mesh = veDeviceMesh.init_device_mesh(
+            device_type="cuda",
+            mesh_shape=(1, 2, 2),
+            mesh_dim_names=("PP", "DP", "TP"),
+            check_uniqueness=False,
+        )
+        tp_sub_mesh = device_mesh["TP"]
+
         # Do fwd+bwd+step on the first data
         for X, Y in data_set[:1]:
             input = vescale.distribute_tensor(X, device_mesh["TP"], [Replicate()])
