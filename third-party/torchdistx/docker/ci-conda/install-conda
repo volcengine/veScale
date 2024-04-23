@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+curl --location --fail --output miniconda3.sh\
+    https://repo.anaconda.com/miniconda/Miniconda3-py39_4.11.0-Linux-x86_64.sh
+
+sh miniconda3.sh -b
+
+rm miniconda3.sh
+
+conda install --yes anaconda-client==1.9.0 conda==4.12.0 conda-build==3.21.8 conda-verify==3.4.2
+
+conda clean --all

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+function print_usage
+{
+    printf "Usage: %s MAJOR.MINOR.PATCH [PRE_RELEASE [REV]]\n" "$(basename "$0")"
+}
+
+function exit_with_usage
+{
+    print_usage >&2 && exit 0
+}
+
+function exit_with_error
+{
+    print_usage >&2 && exit 1
+}
+
+function build_mmp_version
+{
+    echo "$1"
+}
+
+function build_sem_version
+{
+    echo "$1${2:+-$2${3:+.$3}}"
+}
+
+function build_pep_version
+{
+    local -A pre_map=([alpha]=a [beta]=b [dev]=.dev)
+
+    local pre=${2:+${pre_map[$2]:-$2}}
+
+    echo "$1${pre:+$pre${3:-0}}"
+}
+
+function replace_match
+{
+    sed --in-place --expression "$2" "$1"
+}
+
+function main
+{
+    local src_dir
+    local mmp_version
+    local sem_version
+    local pep_version
+
+    if [[ $# -eq 0 || $# -gt 3 ]]; then
+        exit_with_error
+    fi
+
+    if [[ $1 == -h || $1 == --help ]]; then
+        if [[ $# -eq 1 ]]; then
+            exit_with_usage
+        else
+            exit_with_error
+        fi
+    fi
+
+    src_dir=$(cd "$(dirname "$0")" && pwd)/..
+
+    # Build the major.minor.patch, semantic, and PEP440 version strings.
+    mmp_version=$(build_mmp_version "$@")
+    sem_version=$(build_sem_version "$@")
+    pep_version=$(build_pep_version "$@")
+
+    # Update CMake
+    replace_match "$src_dir/CMakeLists.txt"\
+                  "s/VERSION .* LANGUAGES/VERSION $mmp_version LANGUAGES/"
+
+    # Update Python
+    replace_match "$src_dir/src/python/torchdistx/__init__.py"\
+                  "s/__version__ = \".*\"/__version__ = \"$pep_version\"/"
+
+    # Update Setuptools
+    replace_match "$src_dir/setup.py"\
+                  "s/version = \".*\"/version = \"$pep_version\"/"
+
+    # Update Conda
+    replace_match "$src_dir/packaging/conda/meta.yaml"\
+                  "s/version = \".*\"/version = \"$pep_version\"/"
+
+    # Update the VERSION file
+    echo "$sem_version" > "$src_dir/VERSION"
+}
+
+main "$@"

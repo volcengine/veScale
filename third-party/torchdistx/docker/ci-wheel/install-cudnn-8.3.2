@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+# cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+
+mkdir cudnn && cd cudnn
+
+# Taken from https://github.com/pytorch/builder/blob/main/common/install_cuda.sh.
+curl --location --fail --output cudnn.tar.xz\
+    https://developer.download.nvidia.com/compute/redist/cudnn/v8.3.2/local_installers/11.5/cudnn-linux-x86_64-8.3.2.44_cuda11.5-archive.tar.xz
+
+tar xf cudnn.tar.xz
+
+cp cudnn-linux-x86_64-8.3.2.44_cuda11.5-archive/include/* /usr/local/cuda/include
+cp cudnn-linux-x86_64-8.3.2.44_cuda11.5-archive/lib/* /usr/local/cuda/lib64
+
+cd ..
+
+rm -rf cudnn

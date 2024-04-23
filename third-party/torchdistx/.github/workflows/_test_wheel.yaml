@@ -1,0 +1,88 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Reusable - Test the Wheel package
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        type: string
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test_conda:
+    name: Test the Wheel package
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-wheel:2-${{ matrix.build_variant }}
+    strategy:
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    steps:
+      - name: Check-out the repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Download the Wheel package from staging
+        uses: actions/download-artifact@v3
+        with:
+          name: wheel-py${{ matrix.py }}-${{ matrix.build_variant }}-${{ matrix.sanitizer }}
+          path: ~/wheelhouse
+      - name: Set up the Python virtual environment
+        run: |
+          python${{ matrix.py }} -m venv ~/venvs/test
+
+          source ~/venvs/test/bin/activate
+
+          pip install ~/wheelhouse/*.whl\
+                      --requirement use-${{ matrix.build_variant }}.txt\
+                      --requirement requirements-devel.txt\
+                      --no-cache-dir
+      - name: Set the sanitizer variables
+        if: matrix.sanitizer != 'nosan'
+        env:
+          BUILD_VARIANT: ${{ matrix.build_variant }}
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          {
+            if [[ $SANITIZER == "asan_ubsan" ]]; then
+              if [[ $BUILD_VARIANT == "cu102" || $BUILD_VARIANT == "cu113" ]]; then
+                asan_ver=5
+              else
+                asan_ver=6
+              fi
+
+              echo "SANITIZER_LIBRARY=/usr/lib64/libasan.so.$asan_ver"
+            elif [[ $SANITIZER == "tsan" ]]; then
+              echo "SANITIZER_LIBRARY=/usr/lib64/libtsan.so.0"
+            fi
+
+            # Sanitizer Options
+            if [[ $SANITIZER == "asan_ubsan" ]]; then
+              echo "LSAN_OPTIONS=suppressions=LSan.supp,exitcode=0,log_path=$HOME/asan.out"
+            fi
+          } >> $GITHUB_ENV
+      - name: Run the Python tests
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          source ~/venvs/test/bin/activate
+
+          LD_PRELOAD=$SANITIZER_LIBRARY pytest tests
+
+          # Unfortunately Python leaks quite a bit of memory, so we cannot rely
+          # on the output of LSan. Instead we use a rudimentary way to find out
+          # whether we have any leakage caused by our tests. We simply check if
+          # any stack frame has a symbol containing the word 'torchdistx'.
+          if [[ $SANITIZER == "asan_ubsan" ]]; then
+            if find ~ -maxdepth 1 -name 'asan.out.*' -exec cat '{}' \+ | tee /dev/stderr | grep --quiet 'torchdistx'; then
+              exit 1
+            fi
+          fi

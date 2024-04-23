@@ -1,0 +1,83 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Reusable - Build the Wheel package
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        type: string
+        required: true
+      dev_stamp:
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_wheel:
+    name: Build the Wheel package
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-wheel:2-${{ matrix.build_variant }}
+    strategy:
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    steps:
+      - name: Check-out the repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Stamp the package version with the current date
+        if: inputs.dev_stamp
+        run: |
+          version=$(cat VERSION)
+
+          scripts/set-version ${version/-*} dev $(date +%Y%m%d)
+      - name: Set up the Python virtual environment
+        run: |
+          python${{ matrix.py }} -m venv ~/venvs/build
+
+          source ~/venvs/build/bin/activate
+
+          pip install --requirement use-${{ matrix.build_variant }}.txt\
+                      --requirement requirements.txt\
+                      --no-cache-dir
+      - name: Build the library
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          source ~/venvs/build/bin/activate
+
+          if [[ $SANITIZER == "nosan" ]]; then
+            unset SANITIZER
+          fi
+
+          cmake -DCMAKE_BUILD_TYPE=Release\
+                -DTORCHDIST_TREAT_WARNINGS_AS_ERRORS=ON\
+                -DTORCHDIST_DEVELOP_PYTHON=OFF\
+                -DTORCHDIST_INSTALL_STANDALONE=ON\
+                -DTORCHDIST_SANITIZERS="${SANITIZER/_/;}"\
+                -B build
+
+          cmake --build build -j $(nproc)
+      - name: Create the Wheel package
+        run: |
+          source ~/venvs/build/bin/activate
+
+          pip wheel .\
+                    --build-option --plat-name\
+                    --build-option manylinux_2_17_x86_64\
+                    --no-deps\
+                    --wheel-dir ~/wheelhouse
+      - name: Upload the Wheel package to staging
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheel-py${{ matrix.py }}-${{ matrix.build_variant }}-${{ matrix.sanitizer }}
+          path: ~/wheelhouse
+          retention-days: 1

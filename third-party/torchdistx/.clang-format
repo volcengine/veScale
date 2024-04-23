@@ -1,0 +1,12 @@
+BasedOnStyle: Google
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: Empty
+ColumnLimit: 100
+IncludeBlocks: Preserve
+WhitespaceSensitiveMacros: [
+    TORCH_CHECK,
+    TORCH_CHECK_VALUE,
+    TORCH_CHECK_NOT_IMPLEMENTED,
+    TORCH_INTERNAL_ASSERT,
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY,
+]

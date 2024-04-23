@@ -1,0 +1,23 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Build the documentation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+  pull_request_target:
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  build_doc:
+    name: Build
+    uses: ./.github/workflows/_build_doc.yaml

@@ -231,8 +231,30 @@ class DTensorConstructorTest(DTensorTestBase):
     @skip_unless_torch_gpu
     @with_comms
     def test_randn_value(self):
-        self._rand_init_self_compare(dtensor.randn)
-        # self._rand_init_compare(torch.randn, dtensor.randn) # NOTE: Upstream doesn't match
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        torch_op = torch.randn
+        dtensor_op = dtensor.randn
+        for global_shape in [
+            (8,),
+            (8, 9),
+            (9, 10, 11, 12),
+            (33, 11, 13),
+        ]:
+            all_placements = [[Replicate()], [Partial()]] + [[Shard(d)] for d in range(len(global_shape))]
+            for placements in all_placements:
+                torch.manual_seed(0)
+                torch.cuda.manual_seed(0)
+                expected_tensor = torch_op(global_shape, device=self.device_type)
+                dist_expected = distribute_tensor(expected_tensor, device_mesh, placements)
+
+                # create DTensor
+                manual_seed(0, device_mesh)
+                ve_tensor = dtensor_op(global_shape, device_mesh=device_mesh, placements=placements)
+
+                self.assertEqual(ve_tensor.to_local(), dist_expected.to_local(), atol=0.0, rtol=0.0)
+                global_tensor = ve_tensor.full_tensor()
+                expected_tensor = dist_expected.full_tensor()
+                self.assertEqual(global_tensor, expected_tensor, atol=0.0, rtol=0.0)
 
     @with_comms
     def test_arange(self):

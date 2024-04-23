@@ -1,0 +1,11 @@
+[flake8]
+# Line length recommended by black.
+max-line-length = 88
+extend-ignore =
+    # See https://github.com/PyCQA/pycodestyle/issues/373
+    E203,
+    # See https://github.com/psf/black/issues/40
+    E302,
+per-file-ignores=
+    # Ignore `imported but unused`.
+    __init__.py: F401

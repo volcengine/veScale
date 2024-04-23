@@ -1,0 +1,46 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+cmake:
+  - 3.21.0
+cuda:
+  - None
+cuda_home:
+  - None
+cudnn:
+  - None
+cxx_compiler_version:
+  - 11.2.0  # [linux64]
+  - 9.0     # [osx]
+ninja:
+  - 1.10.2
+pip:
+  - 22.0.3
+python:
+  - 3.7
+  - 3.8
+  - 3.9
+  - 3.10
+pytorch:
+  -
+pytorch_variant:
+  - cpu
+sanitizers:
+  - None
+setuptools:
+  - 60.9.3
+wheel:
+  - 0.37.1
+
+zip_keys:
+  - cuda
+  - cuda_home
+  - cudnn
+  - cxx_compiler_version
+  - pytorch_variant
+
+MACOSX_DEPLOYMENT_TARGET:  # [osx]
+  - 10.14                  # [osx]

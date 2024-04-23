@@ -1,0 +1,71 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Reusable - Build the Conda packages
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        type: string
+        required: true
+      dev_stamp:
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_conda:
+    name: Build the Conda packages
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-conda:2-${{ matrix.build_variant }}
+    strategy:
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    steps:
+      - name: Check-out the repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Stamp the package version with the current date
+        if: inputs.dev_stamp
+        run: |
+          version=$(cat VERSION)
+
+          scripts/set-version ${version/-*} dev $(date +%Y%m%d)
+      - name: Run Conda Build
+        working-directory: packaging/conda
+        env:
+          BUILD_VARIANT: ${{ matrix.build_variant }}
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          mkdir ~/conda-build
+
+          variants="--python ${{ matrix.py }}"
+
+          if [[ $BUILD_VARIANT != "cpu" ]]; then
+            variants+=" --variant-config-files variants/$BUILD_VARIANT.yaml"
+          fi
+
+          if [[ $SANITIZER != "nosan" ]]; then
+            variants+=" --variants {sanitizers:[\"${SANITIZER/_/;}\"]} --no-test"
+          fi
+
+          conda build $variants\
+                      --channel pytorch-nightly\
+                      --channel conda-forge\
+                      --output-folder ~/conda-build\
+                      --no-include-recipe\
+                      .
+      - name: Upload the Conda build output to staging
+        uses: actions/upload-artifact@v3
+        with:
+          name: conda-build-py${{ matrix.py }}-${{ matrix.build_variant }}-${{ matrix.sanitizer }}
+          path: ~/conda-build
+          retention-days: 1

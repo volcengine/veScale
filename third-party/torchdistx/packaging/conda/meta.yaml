@@ -1,0 +1,178 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+{% set version = "0.3.0.dev0" %}
+
+{% set build_number = 0 %}
+
+# Set the build string.
+{% if cuda != "None" %}
+  {% set build_str = "py{1}_cu{2}_{0}".format(build_number, python, cuda) %}
+{% else %}
+  {% set build_str = "py{1}_cpu_{0}"  .format(build_number, python) %}
+{% endif %}
+
+# Remove the version dots from the build string.
+{% set build_str = build_str.replace(".", "") %}
+
+# Append the sanitizer tag to the build string.
+{% if sanitizers != "None" %}
+  {% set build_str = "{0}_{1}".format(build_str, sanitizers).replace(";", "_") %}
+{% endif %}
+
+package:
+  name: torchdistx-cc
+  version: {{ version }}
+
+source:
+  path: ../../
+
+build:
+  number: {{ build_number}}
+  string: {{ build_str }}
+  skip: True  # [not unix]
+  script_env:
+    - CUDA_HOME={{ cuda_home }}  # [cuda != "None"]
+    - TORCHDIST_SANITIZERS={{ sanitizers }}  # [sanitizers != "None"]
+  run_exports:
+    # We do not maintain ABI compatibility between releases.
+    - {{ pin_subpackage("torchdistx-cc", exact=True) }}
+  ignore_run_exports:
+    - cudatoolkit
+    - cudnn
+    # The `run_export` section of the `libsanitizer` package does not specify
+    # a valid version range. We override it down below.
+    - libsanitizer
+    # Since we need an exact version of PyTorch we don't have to export its
+    # mutex to our runtime requirements.
+    - pytorch-mutex
+  # libc10 and libtorch do not have their own packages. They are distributed
+  # with the pytorch package and reside under the `lib` sub-directory of the
+  # Python library. Therefore they are not discoverable by Conda and have to
+  # be listed here.
+  missing_dso_whitelist:
+    - "*/libc10*"
+    - "*/libtorch*"
+
+requirements:
+  build:
+    - {{ compiler("cxx") }}
+    - cmake
+    - ninja
+    - nvcc_linux-64 {{ cuda }}  # [cuda != "None"]
+  host:
+    - cudatoolkit {{ cuda }}    # [cuda != "None"]
+    - cudnn {{ cudnn }}         # [cuda != "None"]
+    - libsanitizer {{ cxx_compiler_version }}  # [linux64 and sanitizers != "None"]
+    - python {{ python }}
+    - pytorch {{ pytorch }}
+    - pytorch-mutex 1.0 {{ pytorch_variant }}
+  run:
+    # We include ASan, LSan, UBSan, and TSan libraries if necessary.
+    - {{ pin_compatible("libsanitizer", max_pin="x.x.x") }}  # [linux64 and sanitizers != "None"]
+    # We require the exact same version of PyTorch during runtime since PyTorch
+    # does not offer ABI compatibility.
+    - {{ pin_compatible("pytorch", exact=True) }}
+
+test:
+  commands:
+    - test -f "$PREFIX/lib/libtorchdistx.so.0"     # [linux]
+    - test -f "$PREFIX/lib/libtorchdistx.0.dylib"  # [osx]
+
+outputs:
+  # This package contains the DSO (i.e. libtorchdistx.so).
+  - name: torchdistx-cc
+    script: install-lib.sh
+
+  # This package contains the header files, CMake package configuration, and
+  # soname symbolic link required for development.
+  - name: torchdistx-cc-devel
+    script: install-devel.sh
+    build:
+      string: {{ build_str }}
+      run_exports:
+        - {{ pin_subpackage("torchdistx-cc", exact=True) }}
+    requirements:
+      build:
+        - cmake
+      run:
+        - {{ pin_subpackage("torchdistx-cc", exact=True) }}
+    test:
+      commands:
+        - test -f "$PREFIX/lib/libtorchdistx.so"     # [linux]
+        - test -f "$PREFIX/lib/libtorchdistx.dylib"  # [osx]
+    about:
+      home: https://github.com/pytorch/torchdistx
+      license: BSD
+      license_file: LICENSE
+      summary: torchdistX C++ Runtime Library Development Files
+
+  # This package contains the debug (i.e. DWARF) symbols of the DSO.
+  - name: torchdistx-cc-debug
+    script: install-debug.sh
+    build:
+      string: {{ build_str }}
+      run_exports:
+        - {{ pin_subpackage("torchdistx-cc", exact=True) }}
+    requirements:
+      build:
+        - cmake
+      run:
+        - {{ pin_subpackage("torchdistx-cc", exact=True) }}
+    about:
+      home: https://github.com/pytorch/torchdistx
+      license: BSD
+      license_file: LICENSE
+      summary: torchdistX C++ Runtime Library Debug Symbols
+
+  # This package contains the Python library.
+  - name: torchdistx
+    script: install-python.sh
+    build:
+      string: {{ build_str }}
+      # These environment variables are used by setup.py.
+      run_exports:
+        - {{ pin_subpackage("torchdistx", exact=True) }}
+      # See the torchdistx-cc package above for why we need this list.
+      missing_dso_whitelist:
+        - "*/libc10*"
+        - "*/libtorch*"
+    requirements:
+      build:
+        # We need the compiler here to implicitly export the platform-specific
+        # C++ standard library to the runtime requirements. This is needed for
+        # our Python C extension.
+        - {{ compiler("cxx") }}
+        - cmake
+      host:
+        # We import PyTorch in setup.py to retrieve its version information.
+        - {{ pin_compatible("pytorch", exact=True) }}
+        - pip
+        - python {{ python }}
+        - setuptools
+        - wheel
+      run:
+        - {{ pin_compatible("pytorch", exact=True) }}
+        - {{ pin_subpackage("torchdistx-cc", exact=True) }}
+    test:
+      imports:
+        - torchdistx.deferred_init
+        - torchdistx.fake
+    about:
+      home: https://github.com/pytorch/torchdistx
+      license: BSD
+      license_file: LICENSE
+      summary: torchdistX Python Library
+
+about:
+  home: https://github.com/pytorch/torchdistx
+  license: BSD
+  license_file: LICENSE
+  summary: torchdistX C++ Runtime Library
+
+extra:
+  maintainers:
+    - PyTorch Distributed Team

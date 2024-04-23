@@ -1,0 +1,87 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Reusable - Lint check
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint_check:
+    name: Lint check
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-clang:13
+    steps:
+      - name: Check-out the repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set up the Python virtual environment
+        run: |
+          python3.8 -m venv ~/venvs/lint
+
+          source ~/venvs/lint/bin/activate
+
+          pip install --requirement use-cpu.txt\
+                      --requirement requirements-devel.txt\
+                      --no-cache-dir
+      - id: run_cmake_config
+        name: Configure the CMake project
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          cmake -DCMAKE_CXX_COMPILER=clang++-13 -B build
+      - name: Run clang-format
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          find src tests -name '*.cc' -type f\
+            -exec clang-format-13 --Werror --dry-run '{}' \+
+      - name: Run clang-tidy
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          find src tests -name '*.cc' -type f\
+            -exec clang-tidy-13 --warnings-as-errors='*' -p=build '{}' \+
+      - name: Run flake8
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          flake8 setup.py src tests
+      - name: Run black
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          black --check setup.py src tests
+      - name: Run isort
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          isort --check-only setup.py src tests
+      - name: Run mypy
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          mypy --pretty --show-error-codes setup.py src tests
+      - name: Run shellcheck
+        if: always() && steps.run_cmake_config.outcome == 'success'
+        run: |
+          source ~/venvs/lint/bin/activate
+
+          shellcheck --severity=warning scripts/*\
+                                        docker/ci-*/install-*\
+                                        packaging/conda/*.sh

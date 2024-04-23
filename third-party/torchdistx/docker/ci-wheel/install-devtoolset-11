@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+yum --assumeyes install\
+    devtoolset-11-gcc\
+    devtoolset-11-gcc-c++\
+    devtoolset-11-libasan-devel\
+    devtoolset-11-liblsan-devel\
+    devtoolset-11-libubsan-devel\
+    devtoolset-11-libtsan-devel
+
+yum clean all

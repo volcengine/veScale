@@ -1,0 +1,18 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+FROM ghcr.io/pytorch/torchdistx-ci-wheel:2-cpu
+
+# CUDA 11.7 requires GCC 11.x.
+ENV PATH=/usr/local/cuda-11.7/bin:/opt/rh/devtoolset-11/root/usr/bin:$PATH
+
+ENV LD_LIBRARY_PATH=/usr/local/cuda-11.7/lib64:/opt/rh/devtoolset-11/root/usr/lib64:$LD_LIBRARY_PATH
+
+COPY install-devtoolset-11 install-cuda-11.7 install-cudnn-8.3.2 /root/
+
+RUN /root/install-devtoolset-11
+RUN /root/install-cuda-11.7
+RUN /root/install-cudnn-8.3.2

@@ -129,7 +129,6 @@ def build_gpt_model_optimizer_and_dataset(init_method, dp_size=1, tp_size=1):
         device_type="cuda",
         mesh_shape=(dp_size, tp_size),
         mesh_dim_names=("DP", "TP"),
-        check_uniqueness=False,
     )
 
     # Enable tensor Parallel
@@ -283,7 +282,9 @@ sharding_plan = {"parameter": model_param_sharding_plan, "forward": model_fwd_re
 def get_open_llama_model_optimizer(dp_size, tp_size, layer_number=None):
     from vescale.devicemesh_api import veDeviceMesh
 
-    device_mesh = veDeviceMesh.init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"))
+    device_mesh = veDeviceMesh.init_device_mesh(
+        "cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"), check_uniqueness=True
+    )
     # Set 4 layers to avoid timeout on CI
     # Use 32 layers when running on training platform
     vescale_decoder, config = get_open_llama_model(layer_number=layer_number)

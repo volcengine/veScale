@@ -1,0 +1,109 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Reusable - Deploy
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        type: string
+        required: true
+      s3_wheel_path:
+        type: string
+        required: true
+      doc_folder_override:
+        type: string
+    secrets:
+      anaconda_token:
+        required: true
+      aws_key_id:
+        required: true
+      aws_access_key:
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy_doc:
+    name: Deploy the documentation
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Download the documentation from staging
+        uses: actions/download-artifact@v3
+        with:
+          name: docs
+          path: ~/docs
+      - name: Check-out the gh-pages branch of the repository
+        uses: actions/checkout@v3
+        with:
+          ref: gh-pages
+      - name: Set up Git
+        run: |
+          # See https://github.com/actions/checkout/issues/766.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+      - name: Commit and push the documentation
+        env:
+          DOC_FOLDER_OVERRIDE: ${{ inputs.doc_folder_override }}
+        run: |
+          rsync --recursive --delete-after ~/docs/ ${DOC_FOLDER_OVERRIDE:-$(cat ~/docs/VERSION)}
+
+          git add --all
+
+          if ! git diff --staged --quiet; then
+            git commit --message "Documentation generated from $(git rev-parse --short "$GITHUB_SHA")"
+            git push
+          fi
+
+  deploy_conda:
+    name: Deploy the Conda packages
+    needs: deploy_doc
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-conda:2-cpu
+    strategy:
+      matrix: ${{ fromJSON(inputs.matrix) }}
+      max-parallel: 1
+    steps:
+      - name: Download the Conda build output from staging
+        uses: actions/download-artifact@v3
+        with:
+          name: conda-build-py${{ matrix.py }}-${{ matrix.build_variant }}-nosan
+          path: ~/conda-build
+      - name: Upload the Conda packages to Anaconda
+        run: |
+          find ~/conda-build -name '*.tar.bz2' -type f\
+            -exec anaconda --token ${{ secrets.anaconda_token }} upload --force '{}' \+
+
+  deploy_wheel:
+    name: Deploy the Wheel package
+    needs: deploy_conda
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-wheel:2-cpu
+    strategy:
+      matrix: ${{ fromJSON(inputs.matrix) }}
+      max-parallel: 1
+    steps:
+      - name: Download the Wheel package from staging
+        uses: actions/download-artifact@v3
+        with:
+          name: wheel-py${{ matrix.py }}-${{ matrix.build_variant }}-nosan
+          path: ~/wheelhouse
+      - name: Upload the Wheel package to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.aws_key_id }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_access_key }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          for pkg in ~/wheelhouse/*.whl; do
+              aws s3 cp "$pkg" "s3://${{ inputs.s3_wheel_path }}/${{ matrix.build_variant }}/" --acl public-read
+          done

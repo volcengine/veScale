@@ -1,0 +1,13 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+FROM ghcr.io/pytorch/torchdistx-ci-base:2
+
+ENV PATH=/root/miniconda3/bin:$PATH
+
+COPY install-conda /root/
+
+RUN /root/install-conda

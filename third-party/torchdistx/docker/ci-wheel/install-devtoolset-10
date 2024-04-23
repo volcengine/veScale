@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+# devtoolset-10's gcc and g++ are already installed on manylinux2014.
+
+yum --assumeyes install\
+    devtoolset-10-libasan-devel\
+    devtoolset-10-liblsan-devel\
+    devtoolset-10-libubsan-devel\
+    devtoolset-10-libtsan-devel
+
+yum clean all

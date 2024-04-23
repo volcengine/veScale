@@ -1,0 +1,90 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Build and test the library
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docker/**'
+      - 'docs/**'
+      - '**.md'
+  pull_request:
+    paths-ignore:
+      - 'docker/**'
+      - 'docs/**'
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  lint_check:
+    name: Build
+    uses: ./.github/workflows/_lint.yaml
+
+  build_wheel:
+    name: Build
+    needs: lint_check
+    uses: ./.github/workflows/_build_wheel.yaml
+    with:
+      matrix: |
+        {
+          py: ['3.8'],
+          build_variant: ['cpu', 'cu117', 'cu118'],
+          sanitizer: ['nosan'],
+          include: [
+            {
+              py: '3.8',
+              build_variant: 'cpu',
+              sanitizer: 'asan_ubsan'
+            }
+          ]
+        }
+
+  test_wheel_cpu:
+    name: Test (CPU)
+    needs: build_wheel
+    uses: ./.github/workflows/_test_wheel.yaml
+    with:
+      matrix: |
+        {
+          py: ['3.8'],
+          build_variant: ['cpu'],
+          sanitizer: ['nosan', 'asan_ubsan']
+        }
+
+  test_wheel_cu117:
+    name: Test (CUDA 11.7)
+    needs: test_wheel_cpu
+    uses: ./.github/workflows/_test_wheel.yaml
+    with:
+      matrix: |
+        {
+          include: [
+            {
+              py: '3.8',
+              build_variant: 'cu117',
+              sanitizer: 'nosan'
+            },
+          ]
+        }
+
+  test_wheel_cu118:
+    name: Test (CUDA 11.8)
+    needs: test_wheel_cu117
+    uses: ./.github/workflows/_test_wheel.yaml
+    with:
+      matrix: |
+        {
+          include: [
+            {
+              py: '3.8',
+              build_variant: 'cu118',
+              sanitizer: 'nosan'
+            },
+          ]
+        }

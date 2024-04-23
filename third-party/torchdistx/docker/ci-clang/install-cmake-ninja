@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+curl --location --fail --output cmake.sh\
+    https://github.com/Kitware/CMake/releases/download/v3.21.6/cmake-3.21.6-linux-x86_64.sh
+
+sh cmake.sh --skip-license
+
+rm cmake.sh
+
+curl --location --fail --output ninja.zip\
+    https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-linux.zip
+
+unzip ninja.zip -d /usr/bin
+
+rm ninja.zip

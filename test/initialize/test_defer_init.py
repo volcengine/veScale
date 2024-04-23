@@ -15,7 +15,6 @@
 #
 ################################################################################
 
-import unittest
 from common_dtensor import skip_unless_torch_gpu, with_comms, DTensorTestBase
 from torch.testing._internal.common_utils import run_tests
 
@@ -24,13 +23,14 @@ from torch import nn
 from torch.cuda import empty_cache, memory_reserved, memory_stats, reset_peak_memory_stats, synchronize
 from torchdistx.fake import is_fake
 
+from vescale import distribute_tensor
 from vescale.dtensor.placement_types import Replicate, Shard
-from vescale.dtensor.api import distribute_tensor
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor import randn
 from vescale.initialize.deferred_init import deferred_init, is_deferred, materialize_dtensor, materialize_dparameter
 from vescale.dmodule.api import parallelize_module
+from vescale.dtensor.random import manual_seed
 
 
 class TestDeferInitDTensor(DTensorTestBase):
@@ -43,16 +43,21 @@ class TestDeferInitDTensor(DTensorTestBase):
 
         torch.manual_seed(0)
         torch.cuda.manual_seed(0)
-        tensor_golden = op_call(global_shape)
-        dtensor_golden = distribute_tensor(tensor_golden, mesh, sharding)
+        tensor_golden = op_call(global_shape, device=self.device_type)
+        dist_golden = distribute_tensor(tensor_golden, mesh, sharding)
 
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
+        manual_seed(0, mesh)
         tensor_defer = deferred_init(op_call, global_shape)
         dtensor_defer = materialize_dtensor(tensor_defer, mesh, sharding)
+
         self.assertTrue(
-            torch.equal(dtensor_defer._local_tensor, dtensor_golden._local_tensor),
-            msg=f"{op_call.__name__}({global_shape}), not match: {dtensor_defer} vs {dtensor_golden}!",
+            torch.equal(dtensor_defer.to_local(), dist_golden.to_local()),
+            msg=f"{op_call.__name__}({global_shape}), local tensors don't match: {dtensor_defer.to_local()} vs {dist_golden.to_local()}!",
+        )
+        global_dtensor = dtensor_defer.full_tensor()
+        self.assertTrue(
+            torch.equal(global_dtensor, tensor_golden),
+            msg=f"{op_call.__name__}({global_shape}), global tensors don't match: {global_dtensor} vs {tensor_golden}!",
         )
 
     @skip_unless_torch_gpu
@@ -64,14 +69,18 @@ class TestDeferInitDTensor(DTensorTestBase):
                 for shard in ([Replicate()], [Shard(1)]):
                     self._test_accuracy_base(op, global_shape, shard, mesh)
 
-    @unittest.skip("FIXME!")
     @skip_unless_torch_gpu
     @with_comms
     def test_accuracy_random(self):
-        mesh = DeviceMesh("cuda", list(range(self.world_size)))
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
         for op in (torch.randn, torch.rand):
-            for global_shape in [(4, 16, 16), (4, 5, 16)]:
-                for shard in ([Replicate()], [Shard(1)]):
+            for global_shape in [(9, 7), (4, 16, 16), (4, 5, 16)]:
+                for shard in ([Replicate()], [Shard(0)], [Shard(1)]):
+                    self._test_accuracy_base(op, global_shape, shard, mesh)
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size).reshape(self.world_size // 2, 2))
+        for op in (torch.randn, torch.rand):
+            for global_shape in [(9, 7), (4, 16, 16), (4, 5, 16)]:
+                for shard in ([Replicate(), Replicate()], [Shard(0), Shard(1)], [Shard(1), Shard(0)]):
                     self._test_accuracy_base(op, global_shape, shard, mesh)
 
     def _assert_eq_empty(self, x: torch.Tensor, y: torch.Tensor):

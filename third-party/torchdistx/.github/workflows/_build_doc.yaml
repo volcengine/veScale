@@ -1,0 +1,66 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Reusable - Build the documentation
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build_doc:
+    name: Build the documentation
+    runs-on: ubuntu-18.04
+    container:
+      image: ghcr.io/pytorch/torchdistx-ci-clang:13
+    steps:
+      - name: Check-out the repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set up the Python virtual environment
+        run: |
+          python3.8 -m venv ~/venvs/docs
+
+          source ~/venvs/docs/bin/activate
+
+          pip install --requirement use-cpu.txt\
+                      --requirement requirements.txt\
+                      --requirement docs/requirements.txt\
+                      --no-cache-dir
+      - name: Build the library
+        run: |
+          source ~/venvs/docs/bin/activate
+
+          cmake -GNinja\
+                -DCMAKE_BUILD_TYPE=Release\
+                -DTORCHDIST_TREAT_WARNINGS_AS_ERRORS=ON\
+                -B build
+
+          cmake --build build
+      - name: Install the Wheel package locally
+        run: |
+          source ~/venvs/docs/bin/activate
+
+          pip install --editable .
+      - name: Build the documentation
+        working-directory: docs
+        run: |
+          source ~/venvs/docs/bin/activate
+
+          make html
+      - name: Copy the version file into the documentation
+        run: |
+          cp VERSION docs/build/html
+      - name: Upload the documentation to staging
+        uses: actions/upload-artifact@v3
+        with:
+          name: docs
+          path: docs/build/html
+          retention-days: 1

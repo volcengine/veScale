@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -o errexit
+
+curl --location --fail --output llvm.cert https://apt.llvm.org/llvm-snapshot.gpg.key
+
+apt-key add llvm.cert
+
+rm llvm.cert
+
+add-apt-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-13 main"
+
+apt-get update
+
+apt-get install --yes clang-13 clang++-13 clang-tidy-13 clang-format-13
+
+rm -rf /var/lib/apt/lists/*

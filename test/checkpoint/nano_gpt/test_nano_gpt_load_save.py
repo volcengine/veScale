@@ -52,7 +52,6 @@ class TestNanoGPT1(DTensorTestBase):
             device_type="cuda",
             mesh_shape=(1, 2, 2),
             mesh_dim_names=("PP", "DP", "TP"),
-            check_uniqueness=False,
         )
         tp_sub_mesh = device_mesh["TP"]
 
