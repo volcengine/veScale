@@ -29,6 +29,7 @@ from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dmodule import _factory
 from vescale.dmodule.api import parallelize_module
 from vescale.dmodule.placements_interface import PlacementsInterface as PI
+from vescale.dtensor.random import manual_seed
 
 HIDDEN_SIZE = 4
 
@@ -111,8 +112,12 @@ class DFactoryTest(DTensorTestBase):
             actuals = (actual,)
             goldens = (golden,)
         elif factory in [torch.zeros, torch.ones, torch.empty, torch.randn]:
+            if factory == torch.randn:
+                manual_seed(0, device_mesh)
             with _factory.FactoryDispatchMode(device_mesh=device_mesh, aten_dfactory_pi=aten_dfactory_pi):
                 actual = factory(global_shape, dtype=dtype, layout=layout, requires_grad=requires_grad)
+            if factory == torch.randn:
+                manual_seed(0, device_mesh)
             golden = dfactory(
                 global_shape,
                 dtype=dtype,
@@ -129,7 +134,7 @@ class DFactoryTest(DTensorTestBase):
         for actual, golden in zip(actuals, goldens):
             self.assertTrue(isinstance(actual, DTensor))
             self.assertTrue(isinstance(golden, DTensor))
-            if factory in [torch.empty, torch.randn]:  # TODO: fix torch.rand to equal
+            if factory in [torch.empty]:  # TODO: fix torch.rand to equal
                 is_match = dtensor._utils._equal_meta_data(actual, golden, exact_device=True)
             else:
                 is_match = dtensor.equal(actual, golden)
@@ -155,7 +160,7 @@ class DFactoryTest(DTensorTestBase):
 
         # self._seeding()
         for factory, dfactory in factory_dfactory.items():
-            for global_shape in [(4, 4), (5, 4)]:
+            for global_shape in [(4, 4), (5, 4), (5, 7, 9)]:
                 for placements in ([Replicate()], [Shard(0)]):
                     self._match_factory_dfactory(factory, dfactory, global_shape, placements, device_mesh)
 

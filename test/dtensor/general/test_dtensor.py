@@ -18,8 +18,10 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
+from vescale.dtensor import rand as dtensor_rand
 from vescale import DeviceMesh, DTensor, distribute_tensor
 from vescale.dtensor.placement_types import Partial, Replicate, Shard
+from vescale.dtensor.random import manual_seed
 
 
 class DTensorTest(DTensorTestBase):
@@ -95,6 +97,14 @@ class DTensorTest(DTensorTestBase):
         )  # TODO: resolve
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
         self.assertEqual(dist_tensor.stride(), global_stride)
+
+        local_tensor = torch.randn(1, 0, 24, 128)
+        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
+        self.assertEqual(dist_tensor.stride(), (24 * 128, 24 * 128, 128, 1))
+
+        local_tensor = torch.randn(1, 24, 1, 128)
+        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
+        self.assertEqual(dist_tensor.stride(), (24 * 128 * self.world_size, 128, 128, 1))
 
     @with_comms
     def test_from_local_default(self):
@@ -636,6 +646,23 @@ class DTensorMeshTest(DTensorTestBase):
             [torch.tensor([])] * 2,
             [dt.to_local() for dt in dtensor_list],
         )
+
+    @with_comms
+    def test_random_sub_mesh(self):
+        mesh = DeviceMesh(self.device_type, [0, 2])
+        global_shape = [7, 9]
+        placements = [Shard(0)]
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+        expected_tensor = torch.rand(global_shape, device=self.device_type)
+        dist_expected = distribute_tensor(expected_tensor, mesh, placements)
+        print(f"rank {dist.get_rank()} expected_local {dist_expected.to_local()}")
+
+        # create DTensor
+        manual_seed(0, mesh)
+        ve_tensor = dtensor_rand(global_shape, device_mesh=mesh, placements=placements)
+
+        self.sub_mesh_assert_equal(mesh.mesh, dist_expected.to_local(), dist_expected.to_local(), ve_tensor.to_local())
 
     @with_comms
     def test_redistribute_sub_mesh(self):

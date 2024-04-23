@@ -20,7 +20,6 @@ import torch
 import math
 
 from vescale.dtensor.placement_types import Replicate, Shard
-from vescale.dtensor.device_mesh import init_device_mesh
 from vescale.dmodule.api import parallelize_module
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
@@ -121,9 +120,17 @@ def build_gpt_model_optimizer_and_dataset(init_method, dp_size=1, tp_size=1):
     else:
         gpt = GPT.from_pretrained(init_method, dict(dropout=0.0)).bfloat16()
 
-    device_mesh = init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"))
-    device_mesh.__enter__()
-  
+    open_source = False
+    try:
+        from vescale.devicemesh_api import veDeviceMesh
+    except ImportError:
+        open_source = True
+    device_mesh = veDeviceMesh.init_device_mesh(
+        device_type="cuda",
+        mesh_shape=(dp_size, tp_size),
+        mesh_dim_names=("DP", "TP"),
+    )
+
     # Enable tensor Parallel
     tp_gpt = parallelize_module(gpt, device_mesh["TP"], nanoGPT_plan)
 
@@ -273,15 +280,11 @@ sharding_plan = {"parameter": model_param_sharding_plan, "forward": model_fwd_re
 
 
 def get_open_llama_model_optimizer(dp_size, tp_size, layer_number=None):
-    device_mesh = init_device_mesh(
-        "cuda",
-        (
-            dp_size,
-            tp_size,
-        ),
-        mesh_dim_names=("DP", "TP"),
+    from vescale.devicemesh_api import veDeviceMesh
+
+    device_mesh = veDeviceMesh.init_device_mesh(
+        "cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"), check_uniqueness=True
     )
-    device_mesh.__enter__()
     # Set 4 layers to avoid timeout on CI
     # Use 32 layers when running on training platform
     vescale_decoder, config = get_open_llama_model(layer_number=layer_number)

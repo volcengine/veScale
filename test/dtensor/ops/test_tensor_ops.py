@@ -17,7 +17,7 @@ from unittest import skip
 
 from vescale import DeviceMesh, DTensor, distribute_tensor
 from vescale.dtensor._diff import EnablePartialMode
-from vescale.dtensor.placement_types import Partial, Replicate, Shard
+from vescale.dtensor.placement_types import Partial, Replicate, Shard, InterleavedShard
 
 
 class DistTensorOpsTest(DTensorTestBase):
@@ -500,6 +500,49 @@ class DistTensorOpsTest(DTensorTestBase):
             d_out = torch.unbind(d_x, dim)
             for d_r, r in zip(d_out, out):
                 self.assertEqual(d_r.to_local(), r)
+
+    @with_comms
+    def test_split_interleaved_shard_dim(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.arange(0, 1024)
+        d_x = distribute_tensor(x, device_mesh, [InterleavedShard(0, 2)])
+        d_out_0, d_out_1 = torch.split(d_x, 512, 0)
+        frag_size = 1024 // self.world_size // 2
+        local_res_0 = torch.arange(self.rank * frag_size, (self.rank + 1) * frag_size)
+        local_res_1 = torch.arange(512 + self.rank * frag_size, 512 + (self.rank + 1) * frag_size)
+        self.assertEqual(d_out_0.to_local(), local_res_0)
+        self.assertEqual(d_out_1.to_local(), local_res_1)
+
+    @with_comms
+    def test_cat_shard(self):
+        device_mesh = self.build_device_mesh()
+        x_0 = torch.arange(0, 1024).cuda()
+        x_1 = torch.arange(1024, 2048).cuda()
+        d_x_0 = distribute_tensor(x_0, device_mesh, [Shard(0)])
+        d_x_1 = distribute_tensor(x_1, device_mesh, [Shard(0)])
+        d_res = torch.cat([d_x_0, d_x_1], 0)
+        local_res = torch.cat(
+            [
+                torch.arange(self.rank * 256, (self.rank + 1) * 256),
+                1024 + torch.arange(self.rank * 256, (self.rank + 1) * 256),
+            ],
+            0,
+        ).cuda()
+        self.assertEqual(d_res.to_local(), local_res)
+
+    @with_comms
+    def test_cat_interleaved_shard(self):
+        device_mesh = self.build_device_mesh()
+        x_0 = torch.arange(0, 1024).cuda()
+        x_1 = torch.arange(1024, 2048).cuda()
+        d_x_0 = distribute_tensor(x_0, device_mesh, [InterleavedShard(0, 2)])
+        d_x_1 = distribute_tensor(x_1, device_mesh, [InterleavedShard(0, 2)])
+        d_res = torch.cat([d_x_0, d_x_1], 0)
+        local_res = torch.cat(
+            [i * 512 + torch.arange(self.rank * 128, (self.rank + 1) * 128) for i in range(4)], 0
+        ).cuda()
+        self.assertEqual(d_res.to_local(), local_res)
+        self.assertEqual(d_res.placements[0].interleaved_size, 4)
 
 
 if __name__ == "__main__":

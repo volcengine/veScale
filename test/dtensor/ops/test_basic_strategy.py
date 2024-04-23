@@ -127,7 +127,7 @@ class TestEinsumStrategies(DTensorTestBase):
             ([Shard(0), Replicate()], [Replicate(), Replicate()], [Shard(0), Replicate()]),
             ([Replicate(), Replicate()], [Shard(1), Replicate()], [Shard(1), Replicate()]),
             ([Replicate(), Replicate()], [Replicate(), Replicate()], [Replicate(), Replicate()]),
-            # TODO(cery.di) : support 2d/3d mesh strategy mapping
+            # TODO : support 2d/3d mesh strategy mapping
             ([Replicate(), Shard(1)], [Replicate(), Shard(0)], [Replicate(), Partial()]),
         )
 
