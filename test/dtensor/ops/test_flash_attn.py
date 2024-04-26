@@ -21,12 +21,13 @@ import torch
 from torch.testing._internal.common_utils import (
     run_tests,
 )
-from vescale.dtensor.placement_types import Shard, Replicate, Partial
+from vescale.dtensor.placement_types import Shard
 from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.api import distribute_tensor
 
 HIDDEN_DIM = 4
 BSZ = 3
+
 
 class RepeatTest(DTensorTestBase):
     @property

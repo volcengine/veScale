@@ -449,7 +449,19 @@ class Redistribute(torch.autograd.Function):
 
         # Early return the original DTensor if the placements are the same.
         if input._spec.placements == placements:
-            return input
+            # FIXME: To avoid view(). There are several hidden dangers here:
+            # - The change of the tensor wrapper may cause the failure of the tensor's hooks.
+            # - Modifying the tensor may change the result of is_param of parameters.
+            # - Dynamically modifying the computation graph may cause problems with autograd.
+            return dtensor.DTensor(
+                input._local_tensor,
+                device_mesh,
+                placements,
+                shape=input.shape,
+                dtype=input.dtype,
+                requires_grad=input.requires_grad,
+                stride=input.stride(),
+            )
 
         target_spec = DTensorSpec(device_mesh, placements, tensor_meta=input._spec.tensor_meta)
 

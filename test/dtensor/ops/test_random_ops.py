@@ -70,7 +70,7 @@ class DTensorRandomInitTest(DTensorTestBase):
                             dempty(*global_shape, device_mesh=device_mesh, placements=placements), *args, **kwargs
                         )
                         self.assertTrue(list(dtensor._spec.placements) == placements)
-                        self.assertEqual(dtensor.to_local(), dist_expected.to_local(), atol=0.0, rtol=0.0)
+                        self.assertEqual(dtensor._local_tensor, dist_expected._local_tensor, atol=0.0, rtol=0.0)
                         full_tensor = dtensor.full_tensor()
                         self.assertEqual(full_tensor, expected_tensor, atol=0.0, rtol=0.0)
 

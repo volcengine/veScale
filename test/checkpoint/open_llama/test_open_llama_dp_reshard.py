@@ -18,7 +18,7 @@
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_utils import run_tests
-from vescale.devicemesh_api import veDeviceMesh
+from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 from common_dtensor import DTensorTestBase, with_comms
 import vescale
 
@@ -54,11 +54,13 @@ class OpenLLaMa2Test1(DTensorTestBase):
         ckpt_state = {"model": ddp_decoder, "optimizer": ve_optimizer}
         vescale.checkpoint.save(TMP_CKPT_DIR, ckpt_state)
         # For processes with dp_rank = 0, dump model state_dict
-        if veDeviceMesh.get_data_parallel_rank() == 0:
+        if VESCALE_DEVICE_MESH.get_data_parallel_rank() == 0:
             dumped_model_sd = {}
             for k, v in ddp_decoder.state_dict().items():
                 dumped_model_sd[k] = v._local_tensor
-            torch.save(dumped_model_sd, f"open_llama_dp_reshard_model_tp_{veDeviceMesh.get_tensor_parallel_rank()}.pt")
+            torch.save(
+                dumped_model_sd, f"open_llama_dp_reshard_model_tp_{VESCALE_DEVICE_MESH.get_tensor_parallel_rank()}.pt"
+            )
 
         # Save merged optimizer state dict
         optimizer_state = ve_optimizer.state_dict()
@@ -86,7 +88,7 @@ class OpenLLaMa2Test2(DTensorTestBase):
         vescale.checkpoint.load(TMP_CKPT_DIR, ckpt_state)
         # Load model state dict and verify it
         dumped_model_sd = torch.load(
-            f"open_llama_dp_reshard_model_tp_{veDeviceMesh.get_tensor_parallel_rank()}.pt", map_location="cpu"
+            f"open_llama_dp_reshard_model_tp_{VESCALE_DEVICE_MESH.get_tensor_parallel_rank()}.pt", map_location="cpu"
         )
 
         current_model_sd = ddp_decoder.state_dict()

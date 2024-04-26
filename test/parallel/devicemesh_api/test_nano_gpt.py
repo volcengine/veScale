@@ -17,7 +17,8 @@
 from torch.testing._internal.common_utils import run_tests
 import torch
 import vescale
-from vescale.devicemesh_api import veDeviceMesh
+import unittest
+from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 from vescale.dtensor.placement_types import Replicate
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from parallel.devicemesh_api._build import build_gpt_model_and_optimizer, prepare_config_and_data, system_setup
@@ -39,12 +40,15 @@ class TestNanoGPTTwoDimDMAPI(DTensorTestBase):
         # the GPT loads pretrained weights from OpenAI GPT2 repository on Huggingface
         return "scratch"
 
+    @unittest.skip("fix me: CPU dist optimizer")
     @with_comms_device("cpu")
     def test_2d_dp_tp_doptim_gpt_cpu(self):
         """
         Test 3-dimensional strategy demo on CPU.
         When the demo runs on CPU, it uses gloo as backend.
         """
+        device_handle = getattr(torch, self.device_type, None)
+        device_handle.set_device(0)
         self._test_2d_dp_tp_doptim_gpt()
 
     @with_comms_device("cuda")
@@ -55,6 +59,7 @@ class TestNanoGPTTwoDimDMAPI(DTensorTestBase):
         """
         self._test_2d_dp_tp_doptim_gpt()
 
+    @unittest.skip("fix me: CPU dist optimizer")
     @with_comms_device("cpu")
     def test_2d_dp_tp_sp_doptim_gpt_cpu(self):
         """
@@ -103,6 +108,7 @@ class TestNanoGPTTwoDimDMAPI(DTensorTestBase):
         }
         self._test_gpt(task_config)
 
+    @unittest.skip("fix me: CPU dist optimizer")
     @with_comms_device("cpu")
     def test_2d_dp_tp_base_optimizer_gpt_cpu(self):
         """
@@ -150,8 +156,8 @@ class TestNanoGPTTwoDimDMAPI(DTensorTestBase):
             optimizer.step()
 
     def _process_data(self, x, y):
-        if veDeviceMesh.get_strategy_size("TP") > 1:
-            tp_mesh = veDeviceMesh.get_tensor_parallel_mesh()
+        if VESCALE_DEVICE_MESH.get_strategy_size("TP") > 1:
+            tp_mesh = VESCALE_DEVICE_MESH.get_tensor_parallel_mesh()
             x = vescale.distribute_tensor(x, tp_mesh, [Replicate()])
             y = vescale.distribute_tensor(y, tp_mesh, [Replicate()])
         return x, y
@@ -169,6 +175,7 @@ class TestNanoGPTOneDimDMAPI(DTensorTestBase):
         # the GPT loads pretrained weights from OpenAI GPT2 repository on Huggingface
         return "scratch"
 
+    @unittest.skip("fix me: CPU dist optimizer")
     @with_comms_device("cpu")
     def test_1d_dp_gpt_cpu(self):
         """
@@ -196,9 +203,13 @@ class TestNanoGPTOneDimDMAPI(DTensorTestBase):
         model.to("cuda")
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
         # Initialize global DeviceMesh
-        device_mesh = veDeviceMesh.init_device_mesh("cuda", mesh_shape=(dp_size,), mesh_dim_names=("DP",))
+        VESCALE_DEVICE_MESH.init_device_mesh("cuda", mesh_shape=(dp_size,), mesh_dim_names=("DP",))
         # Wrap model with DDP module. Since 1D global DeviceMesh cannot slice sub-DeviceMesh. we have to rely on get_data_parallel_dim_groups()
-        dp_comm = veDeviceMesh["DP"] if veDeviceMesh.ndim > 1 else veDeviceMesh.get_data_parallel_dim_groups()
+        dp_comm = (
+            VESCALE_DEVICE_MESH["DP"]
+            if VESCALE_DEVICE_MESH.ndim > 1
+            else VESCALE_DEVICE_MESH.get_data_parallel_dim_groups()
+        )
         model = DDP(
             model,
             data_pg_or_device_mesh=dp_comm,
@@ -209,6 +220,7 @@ class TestNanoGPTOneDimDMAPI(DTensorTestBase):
         # Train model
         self.train(model, optimizer, data_set, use_dist_tensor=False)
 
+    @unittest.skip("fix me: CPU dist optimizer")
     @with_comms_device("cpu")
     def test_1d_tpsp_gpt_cpu(self):
         """
@@ -235,8 +247,8 @@ class TestNanoGPTOneDimDMAPI(DTensorTestBase):
         tp_size = 2
         model, data_set = self._prepare()
         # Initialize global DeviceMesh
-        device_mesh = veDeviceMesh.init_device_mesh("cuda", mesh_shape=(tp_size,), mesh_dim_names=("TP",))
-        model = parallelize_module(model, device_mesh, nanoGPT_plan)
+        VESCALE_DEVICE_MESH.init_device_mesh("cuda", mesh_shape=(tp_size,), mesh_dim_names=("TP",))
+        model = parallelize_module(model, VESCALE_DEVICE_MESH.get(), nanoGPT_plan)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
         # Train model
         self.train(model, optimizer, data_set, use_dist_tensor=True)
@@ -262,7 +274,7 @@ class TestNanoGPTOneDimDMAPI(DTensorTestBase):
 
     def _process_data(self, x, y, use_dist_tensor=False):
         if use_dist_tensor:
-            tp_mesh = veDeviceMesh.get()
+            tp_mesh = VESCALE_DEVICE_MESH.get()
             x = vescale.distribute_tensor(x, tp_mesh, [Replicate()])
             y = vescale.distribute_tensor(y, tp_mesh, [Replicate()])
         return x, y

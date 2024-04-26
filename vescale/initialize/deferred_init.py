@@ -189,14 +189,14 @@ def materialize_dparameter(
     torch_device = torch.device(device)
     # materialize local tensor
     if _C.is_gen_by_random_op(param):
-        tensor_meta = TensorMeta(global_shape, (0,), param.data.dtype)
+        tensor_meta = TensorMeta(global_shape, torch_stride, param.data.dtype)
         spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
 
         assert random.is_rng_supported_mesh(
             device_mesh
         ), "currently, random DTensor only support cuda/cuda=like device!"
         if not random._rng_tracker:
-            random._rng_tracker = random.OffsetBasedRNGTracker()
+            random._rng_tracker = random.init_vescale_rng_tracker()
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):
             param = _C.materialize_tensor_with_local_shape(param, local_shape, torch_device)

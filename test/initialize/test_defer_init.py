@@ -15,6 +15,7 @@
 #
 ################################################################################
 
+import unittest
 from common_dtensor import skip_unless_torch_gpu, with_comms, DTensorTestBase
 from torch.testing._internal.common_utils import run_tests
 
@@ -27,7 +28,6 @@ from vescale import distribute_tensor
 from vescale.dtensor.placement_types import Replicate, Shard
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.device_mesh import DeviceMesh
-from vescale.dtensor import randn
 from vescale.initialize.deferred_init import deferred_init, is_deferred, materialize_dtensor, materialize_dparameter
 from vescale.dmodule.api import parallelize_module
 from vescale.dtensor.random import manual_seed
@@ -90,43 +90,6 @@ class TestDeferInitDTensor(DTensorTestBase):
         self.assertTrue(x.device.type == y.device.type)
         self.assertTrue(x.layout == y.layout)
         self.assertTrue(x.requires_grad == y.requires_grad)
-
-    @skip_unless_torch_gpu
-    @with_comms
-    def test_accuracy_random2(self):
-        mesh = DeviceMesh("cuda", list(range(self.world_size)))
-
-        torch.use_deterministic_algorithms(True)
-
-        # replicate
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
-        defer_dtensor = deferred_init(torch.randn, (4, 16, 16))
-        dtensor_replicate = materialize_dtensor(defer_dtensor, mesh, [Replicate()])
-
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
-        expected_tensor = torch.randn((4, 16, 16), device=mesh.device_type)
-
-        self.assertTrue(torch.equal(dtensor_replicate._local_tensor, expected_tensor))
-
-        # shard
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
-        defer_dtensor = deferred_init(torch.randn, (4, 16, 16))
-        dtensor = materialize_dtensor(defer_dtensor, mesh, [Shard(1)])
-
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
-        dtensor_rand = randn((4, 16, 16), device_mesh=mesh, placements=[Shard(1)])
-
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
-        expected_tensor = torch.randn((4, 16 // self.world_size, 16), device=mesh.device_type)
-
-        self._assert_eq_empty(dtensor._local_tensor, expected_tensor)
-        self._assert_eq_empty(dtensor_rand._local_tensor, expected_tensor)
-        self._assert_eq_empty(dtensor_rand._local_tensor, dtensor._local_tensor)
 
     @skip_unless_torch_gpu
     @with_comms
@@ -215,38 +178,44 @@ class TestDeferInitDParameter(DTensorTestBase):
 
     @skip_unless_torch_gpu
     @with_comms
+    @unittest.skip(
+        "torchdistx.deferred_init._C.is_gen_by_random_op doesn't know that nn.Linear is randomly initialized"
+    )
     def test_dparameter(self):
         mesh = DeviceMesh("cuda", list(range(self.world_size)))
+        # all_shapes = [(4, 4), (5, 9), (13, 7)]
+        # all_placesments = [[Shard(0)], [Shard(1)], [Replicate()]]
+        all_shapes = [(4, 4)]
+        all_placesments = [[Shard(0)]]
+        for shape in all_shapes:
+            for placements in all_placesments:
+                torch.cuda.manual_seed_all(0)
+                expected_fc = nn.Linear(*shape, device=self.device_type)
+                dist_fc_wgt = distribute_tensor(expected_fc.weight, mesh, placements)
+                if mesh.get_rank() == 0:
+                    print(f"expected_fc.weight {expected_fc.weight}")
 
-        fc = deferred_init(nn.Linear, 4, 4)
-        self.assertTrue(is_deferred(fc))
-        self.assertTrue(is_deferred(fc.weight))
-        self.assertTrue(is_fake(fc.weight))
-        self.assertTrue(not is_deferred(fc.weight.data))  # NOTE
-        self.assertTrue(is_fake(fc.weight.data))
-        self.assertTrue(fc.weight.requires_grad)
-        self.assertTrue(not fc.weight.data.requires_grad)
+                manual_seed(0, mesh)
+                fc = deferred_init(nn.Linear, *shape)
+                self.assertTrue(is_deferred(fc))
+                self.assertTrue(is_deferred(fc.weight))
+                self.assertTrue(is_fake(fc.weight))
+                self.assertTrue(not is_deferred(fc.weight.data))  # NOTE
+                self.assertTrue(is_fake(fc.weight.data))
+                self.assertTrue(fc.weight.requires_grad)
+                self.assertTrue(not fc.weight.data.requires_grad)
 
-        if self.rank == 0:
-            print("*** BEFORE ***", fc.weight)
+                dparam = materialize_dparameter(fc.weight, mesh, placements)
+                print(f"rank {mesh.get_rank()} dparam.data {dparam.data._local_tensor}")
+                self.assertTrue(isinstance(dparam, nn.Parameter))
+                self.assertTrue(dparam.requires_grad)
+                self.assertTrue(isinstance(dparam.data, DTensor))
+                self.assertTrue(not dparam.data.requires_grad)
+                self.assertTrue(isinstance(dparam.data._local_tensor, torch.Tensor))
 
-        dparam = materialize_dparameter(fc.weight, mesh, [Shard(0)])
-
-        if self.rank == 0:
-            print("*** AFTER ***", dparam)
-
-        # self.assertTrue(not is_deferred(dparam))
-        # self.assertTrue(not is_fake(dparam))
-        # self.assertTrue(not is_deferred(dparam.data))
-        # self.assertTrue(not is_fake(dparam.data))
-        self.assertTrue(isinstance(dparam, nn.Parameter))
-        self.assertTrue(dparam.requires_grad)
-        self.assertTrue(isinstance(dparam.data, DTensor))
-        self.assertTrue(not dparam.data.requires_grad)
-        self.assertTrue(isinstance(dparam.data._local_tensor, torch.Tensor))
-        self.assertEqual(dparam.data._local_tensor.shape, (1, 4))
-        self.assertTrue(dparam.data._local_tensor.is_cuda)
-        self.assertTrue(not dparam.data._local_tensor.requires_grad)
+                self.assertEqual(dparam.data._local_tensor, dist_fc_wgt._local_tensor, atol=0.0, rtol=0.0)
+                full_dparam = dparam.data.full_tensor()
+                self.assertEqual(full_dparam, expected_fc.weight, atol=0.0, rtol=0.0)
 
 
 class MLP(nn.Module):

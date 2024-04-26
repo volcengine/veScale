@@ -1,55 +1,51 @@
-# veScale Optimizers
+# veScale Optimizer Parallel
+
+## TLDR
+
+<img src="../../docs/pictures/doptimizer.png" alt="DO" width="800"/>
 
 ## Overview
 
-In distributed training, optimizers also need to be adjusted accordingly. We provide two options:
+In veScale, we provide two optimizers for _Optimizer Parallel_:
 
-### `BasicOptimizer`
+- `DistributedOptimizer`
 
-A simple optimizer warpper plus some utilities for distributed training, such as recover flattened gradient from `DDP` and trigger gradient all-reduce for LayerNorm (or some other similar) blocks in Sequence Parallel. `BasicOptimizer` is not a ZeRO optimizer.
+- `BasicOptimizer`
 
-### `DistributedOptimizer`
+### veScale `DistributedOptimizer`
 
-A "ZeRO 2+" optimizer. Simliar to `DDP`, veScale `DistributedOptimizer` is primarily inherited from [Megatron-LM's DistributedOptimizer](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/optimizer/distrib_optimizer.py). We extend compatibility of its implementation with our DTensor.
+#### What is it?
 
-## Implementation
+`DistributedOptimizer` is a _ZeRO 2+_ optimizer. Similar to the original _ZeRO2_, it parallelizes model gradient and optimizer states along _Data Parallel_ dimension. Differently, it further parallelizes model parameters virtually but not physically.
 
-### `BasicOptimizer`
+`DistributedOptimizer` is primarily inherited from [Megatron-LM's DistributedOptimizer](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/optimizer/distrib_optimizer.py) for its performance and mostly due to the lacking of _ZeRO2_ optimizer in native PyTorch. We extend and enhance `DistributedOptimizer` with extra features:
 
-`BasicOptimizer`'s implementation is quite simple. See the docstring of `BasicOptimizer` at `<repo>/vescale/optim/base_optimizer.py`.
+- convert between `Tensor` and `DTensor`
 
-### `DistributedOptimizer`
+- support online resharding of optimzier state
 
-`DistributedOptimizer`'s implementation is complex. Different from `DDP`, in `DistributedOptimizer`, the model parameters and gradients are further split. Each DP rank only obtains the corresponding gradient, updates the corresponding parameters, maintaining the corresponding optimizer states. Therefore, a typical optimizer initialization and step process of `DistributedOptimizer` includes the following stages:
+#### How does it work?
 
-1. At initialzation, model parameters need to be split across all DP ranks, but this is not a `real` split. Each DP rank actually owns a partial view of the original model parameters. Note that this split does not respect parameter boundaries, which means that a parameter could be split into two halves and belong to two DP ranks. Therefore, a complex mapping between the dp-sharded parameters and the original parameters needs to be established, which is mostly done in the init function. At last, we replace the optimizer's param_groups with the dp-sharded parameter.
+In `DistributedOptimizer`, the model gradients and optimizer states are sharded along _Data Parallel_ dimension in each gradient _Bucket_ of _Gradient Buffer_ (see `DDP` for more details), where each DP rank only manages its own shard of gradient, generates its own shard of optimizer states, and updates its own shard of parameters.
 
-2. At step, copy `main_grad` attached at original parameter by `DDP` to the dp-sharded parameters.
+The flow of `DistributedOptimizer` is as follows:
 
-3. Run `optimizer.step()`.
+0. During initialization, model parameters are virtually sharded across all DP ranks, such that each DP rank owns a partial view of the original model parameters
+ - This sharding does not respect parameter boundaries, i.e., a parameter could be split into two halves and belong to two DP ranks. Therefore, a complex mapping between the sharded parameters and the original parameters is established, which is mostly done in the `__init__` function. Then the optimizer's `param_groups` is replaced with the _Sharded Parameter_.
 
-4. Copy updated dp-sharded parameters to a specific param buffer. To avoid the overhead of sending each parameter individually through an allgather operation, we reused the gradient buffer's space as a parameter buffer. This allow us to store the updated parameters temporarily before they are all-gathered back to their original form before the next forward execution. This strategy helped us save GPU memory. And this introduce a further optimization.
+1. Receive _Reduced Gradient_ resulting from `ReduceScatter` per Gradient _Bucket_ in `DDP`
 
-    - We further overlap the param all-gather with the forward, which means we trigger next part's param all-gather when we are doing the current part's forward.
+2. Attach _Reduced Gradient_ (`main_grad` of each original parameter) to the _Sharded Parameter_
 
-## Compatibility of Optimizer with `DDP`
+3. Run the actual `optimizer.step()` to generate _Optimizer State_ of each shard and updates _Sharded Parameter_ with _Reduced Gradient_
 
-The compatibility of these two optimizers and `DDP` strategy is shown as follows:
+4. Copy the updated _Sharded Parameter_ to a specific parameter buffer and get ready for `AllGather` communication to restore the full parameters
 
-|          | `BasicOptimizer` | `DistributedOptimizer` |
-| -------- | ---------------- | ---------------------- |
-| `DDP`    |      yes         |        yes             |
-| NO `DDP` |      yes         |         no             |
+ - To avoid the performance overhead and memory cost of per-parameter `AllGather`, the _Gradient Buffer_ of `DDP` is reused as the communication buffer for `AllGather`.
+  
+5. Overlap the parameter `AllGather` with the forward computation in the next iteration for hiding communication overhead, similar to gradient `ReduceScater` overlap with backward computation
 
-## Example
-
-### `BasicOptimizer`
-
-See `<repo>/test/parallel/ddp_optim/test_ddp.py`. 
-
-### `DistributedOptimizer`
-
-A simple usage case is here. For more tests, see `<repo>/test/parallel/ddp_optim/test_doptimizer.py`.
+#### How to use it?
 
 ```python
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
@@ -63,14 +59,13 @@ mlp = MLP()
 # create 2-dim DeviceMesh, the first for data-parallel, while the second for tensor-parallel.
 device_mesh = DeviceMesh("cuda", [[0, 1], [2, 3]], mesh_dim_names=("DP", "TP"))
 
-# parallelize torch-native model into TP model (see: `<repo>/vescale/dmodule/README.md`)
-tp_mlp = parallelize_module(mlp, device_mesh["TP"], param_and_fwd_sharding_plan)
+# parallelize torch-native model into TP model
+tp_mlp = parallelize_module(mlp, device_mesh["TP"], sharding_plan)
 
-# wrap TP model with `DDP` (see: `<repo>/vescale/ddp/README.md`)
+# wrap TP model with `DDP`
 dp_tp_mlp = DDP(
     module=tp_mlp,
-    data_pg_or_device_mesh=device_mesh["DP"],
-    overlap_grad_reduce=False,
+    device_mesh["DP"],
     use_distributed_optimizer=True
 )
 
@@ -98,3 +93,34 @@ doptim.zero_grad()
 # <repeat above>
 
 ```
+
+APIs can found in: `<repo>/vescale/optim/distributed_optimizer.py`.
+
+More examples can found in: `<repo>/test/parallel/ddp_optim/test_doptimizer.py`.
+
+### veScale `BasicOptimizer`
+
+`BasicOptimizer` is a not ZeRO optimizer but a simple optimizer that works like _Data Parallel_ which replicates parameters, gradients, and optimizer states along _Data Parallel_ dimension.
+
+`BasicOptimizer` itself is nothing but a simple wrapper that wraps given optimizer instance with utilities for veScale `DTensor`, `DModule`, and `DDP`:
+
+- convert between `Tensor` and `DTensor`
+
+- recover flattened gradient from `DDP` 
+
+- trigger gradient synchronization of `DModule` (e.g., for Sequence Parallel) 
+
+
+APIs can be found in: `<repo>/vescale/optim/base_optimizer.py`.
+
+Examples can be found in `<repo>/test/parallel/ddp_optim/test_ddp.py`. 
+
+
+## How are these optimizers related with `DDP`?
+
+The compatibility of the above optimizers with `DDP` is as follows:
+
+|          | `BasicOptimizer` | `DistributedOptimizer` |
+| -------- | ---------------- | ---------------------- |
+| `DDP`    |      yes         |        yes             |
+| NO `DDP` |      yes         |         no             |

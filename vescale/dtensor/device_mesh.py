@@ -266,6 +266,34 @@ class DeviceMesh:
         # step 1: try to create default world pg.
         if pg is None:
             pg = self._get_or_create_default_group()
+        else:
+            # TODO: this logic only applies when device_type is cuda
+            pg_world_size = get_world_size(group=pg)
+            device_handle = _get_device_handle(self.device_type)
+            num_devices_per_host = device_handle.device_count()
+            if pg_world_size > num_devices_per_host and pg_world_size % num_devices_per_host != 0:
+                raise RuntimeError(
+                    f"DeviceMesh only support homogeneous hardware, but found "
+                    f"{pg_world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                )
+        if self.device_type == "cuda":
+
+            def _get_current_device():
+                try:
+                    if torch.cuda.is_available():
+                        return torch.cuda.current_device()
+                    else:
+                        return None
+                except AssertionError as e:
+                    return None
+
+            device_handle = _get_device_handle(self.device_type)
+            num_devices_per_host = device_handle.device_count()
+            local_rank = get_rank() % num_devices_per_host
+            if local_rank != _get_current_device():
+                warnings.warn("Remember to set cuda device id to local rank!!!")
+                device_handle = _get_device_handle(self.device_type)
+                device_handle.set_device(local_rank)
 
         # step 2: validate the mesh before following usage.
         if _validate_mesh:

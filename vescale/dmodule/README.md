@@ -1,4 +1,8 @@
-# veScale DModule (Distributed Module)
+# veScale DModule for Tensor Parallel & Sequence Parallel
+
+## TLDR
+
+<img src="../../docs/pictures/dmodule.png" alt="DModule" width="600"/>
 
 ## Why veScale DModule?
 
@@ -20,7 +24,7 @@
         - [experimental] given by "automatical plan generation" of veScale
     - handles gradient synchronization automatically in backward
     - support deferred initialization with `deferred_init()` (i.e., initialize with `Fake` Tensor without allocating memory, then shard Fake Tensor with TP, and then materialize only a shard of `Tensor` on device)
-    - support third-party plug-in Module (e.g. APEX)
+    - support third-party plug-in Module (e.g. `APEX`)
     - provide patch interface for customized Module-level hacking
     - extend to optional DP, optional FSDP, and optional EP (in the future)
     - provide debuggability for easy dumping, printing, listing, etc.
@@ -29,7 +33,7 @@
 
 - veScale `DModule` is inspired by PyTorch's [`parallelize_module`](https://pytorch.org/docs/stable/_modules/torch/distributed/tensor/parallel/api.html#parallelize_module), but is developed with explicit Module-level abstraction with complete features for our production usage.
 
-- veScale `DModule` extends PyTorch `parallelize_module` with extra features as below (i.e., major differences from PyTorch-v2.2.0): 
+- veScale `DModule` extends PyTorch `parallelize_module` with extra features as below: 
     - nD Tensor Parallelism
     - Sequence Parallelism
     - auto gradient synchronization
@@ -38,7 +42,7 @@
     - module-level patch interface
     - [experimental] automatical plan generation
 
-## How to use veScale DModule ``manually''?
+## How to use veScale DModule manually?
 
 - Example of `MLP`:
 
@@ -64,14 +68,14 @@
     # parallelize model into DModule with "maunal plans"
     dmlp = parallelize_module(mlp, 
                             DeviceMesh("cuda", [0, 1, 2, 3]), 
-                            {
-                                "parameter" : {
+                            { # sharding plan
+                                "parameter" : { # appoint "which param" with what [placements]
                                     "fc1.weight": [Shard(0)],
                                     "fc1.bias": [Shard(0)],
                                     "fc2.weight": [Shard(1)],
                                     "fc2.bias": [Replicate()],
                                 },
-                                "forward" : {
+                                "forward" : { # appoint "which activation" with what [placements]
                                     "fc1.input": [[Replicate()]], # change to Shard(<dim>) for SP/DP
                                     "fc2.output": [[Replicate()]],
                                 }
@@ -85,6 +89,6 @@
 
     ```
 
-- More details can be found in `<repo>/vescale/dmodule/api.py`
+- APIs can be found in `<repo>/vescale/dmodule/api.py`
 
 - More examples can be found under `<repo>/test/dmodule/*.py`

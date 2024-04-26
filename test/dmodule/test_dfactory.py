@@ -134,7 +134,7 @@ class DFactoryTest(DTensorTestBase):
         for actual, golden in zip(actuals, goldens):
             self.assertTrue(isinstance(actual, DTensor))
             self.assertTrue(isinstance(golden, DTensor))
-            if factory in [torch.empty]:  # TODO: fix torch.rand to equal
+            if factory in [torch.empty]:
                 is_match = dtensor._utils._equal_meta_data(actual, golden, exact_device=True)
             else:
                 is_match = dtensor.equal(actual, golden)

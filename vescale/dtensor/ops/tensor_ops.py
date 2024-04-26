@@ -940,9 +940,8 @@ def index_add_rule(op_schema: OpSchema) -> OutputSharding:
     if not index_spec.is_replicated():
         raise RuntimeError("index must be replicate for index_add op")
 
-    if src_spec.sums or input_spec.sums:
-        # TODO: maybe we should allow partial here.
-        raise NotImplementedError("src and input can not be partial for index_add op")
+    if src_spec.sums != input_spec.sums:
+        raise NotImplementedError("src and input should be both partial or non-partial for index_add op")
 
     if src_spec.ndim != input_spec.ndim:
         raise RuntimeError("invalid index_add op detected")

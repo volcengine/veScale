@@ -459,9 +459,12 @@ class DistTensorOpsTest(DTensorTestBase):
         tensor = torch.randn((4,))
         matrix = torch.randn((2, 3, 4))
         dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
-        dmatrix = distribute_tensor(matrix, device_mesh, [Shard(0)])
-        dout = dtensor.expand_as(dmatrix)
-        assert dout._spec.placements[0] == Shard(0), f"sharding error {dout._spec}"
+        dmatrix_shard = distribute_tensor(matrix, device_mesh, [Shard(0)])
+        dout1 = dtensor.expand_as(dmatrix_shard)
+        assert dout1._spec.placements[0] == Shard(0), f"sharding error {dout1._spec}"
+        dmatrix_partial = dmatrix_shard.redistribute(device_mesh, [Partial()])
+        dout2 = dtensor.expand_as(dmatrix_partial)
+        assert dout2._spec.placements[0] == Replicate(), f"sharding error {dout2._spec}"
 
     @with_comms
     @skip("failed")

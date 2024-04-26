@@ -1,5 +1,9 @@
 # DTensor (Distributed Tensor)
 
+## TLDR
+
+<img src="../../docs/pictures/dtensor.png" alt="DTensor" width="350"/>
+
 ## Why DTensor?
 
 - `torch.Tensor` lacks the semantic of being distributed across multiple devices and running distributed operators
@@ -12,71 +16,63 @@
 
 - `DTensor` transparently handles all distributed logic under the hood (sharded storage on each device, the collective communication among devices, and the operator kernel split across devices)
 
-- `DTensor` is implemented by a wrapper class on `torch.tensor` with a meta data `DTensorSpec` describing:
+- `DTensor` is implemented by a wrapper class on `torch.Tensor` with a meta data `DTensorSpec` describing:
 
     - which multiple devices (`DeviceMesh`) is distributed upon
 
-    - how is `DTensor` placed (`placements`) on the `DeviceMesh`; there are three main `placements`:
+        - it can be 1D mesh of two GPUs: `DeviceMesh("cuda", [0, 1])`
+        - it can be 2D mesh of four GPUs: `DeviceMesh("cuda", [[0, 1], [2, 3]])`
 
-        - `Replicate`: `DTensor` is replicated on the `DeviceMesh`
-        - `Shard`: `DTensor` is sharded on the `DeviceMesh`
-        - `Partial`: `DTensor` is a partial product on the `DeviceMesh` with pending sum (`AllReduce`) to be a total product
+    - how is `DTensor` placed (`Placement`) on the `DeviceMesh`:
+    
+        - there are three main `Placement`:
 
-    - what is the global tensor shape & stride (`tensor_meta`) of this `DTensor`
+            - `Shard(<tensor_dim>)`: `DTensor`'s `<tensor_dim>` is sharded on the `DeviceMesh`
+            - `Replicate`: `DTensor` is replicated on the `DeviceMesh`
+            - `Partial`: `DTensor` is a partial product on the `DeviceMesh` with pending sum (`AllReduce`) to be a total product
+        
+        - where a list of `Placement` is needed to define the `placements` of a `DTensor`:
 
-- `DTensor` computation is implemented by `ShardingPropagator` which propagates placements from input to output for each operator with pre-registered sharding rules and strategies
+            - `placements = [Shard(1)]` means `DTensor`'s tensor dim #1 is sharded along `DeviceMesh`'s dim #0 (i.e., the #0 element in the list)
 
-## How to use DTensor ``manually''?
+            - `placements = [Shard(1), Shard(0)]` means `DTensor`'s tensor dim #1 is sharded along `DeviceMesh`'s dim #0 and `DTensor`'s tensor dim #0 is sharded along `DeviceMesh`'s dim #1
 
-- Example of `matmul`:
+            - `placements = [Shard(1), Replicate()]` means `DTensor`'s tensor dim #1 is sharded along `DeviceMesh`'s dim #0 and `DTensor`'s rest tensor dim #0 is replicated along `DeviceMesh`'s dim #1
 
-    ``` python
-    # create a four-device mesh
-    device_mesh = DeviceMesh("cuda", [0, 1, 2, 3])
+    - what is the global tensor shape & stride (`TensorMeta`) of this `DTensor`
 
-    # single device matmul
-    t1 = torch.ones(12, 8, device="cuda")
-    t2 = torch.ones(8, 16, device="cuda")
-    t3 = torch.mm(t1, t2)
+- `DTensor` operators (e.g., `torch.add`) are implemented by `ShardingPropagator` which propagates `placements` from input to output for each operator with pre-registered sharding rules and strategies
 
-    # multiple device matmul
-    dt1 = distribute_tensor(t1, device_mesh, [Shard(dim=1)]) # colwise shard t1 on device mesh
-    dt2 = distribute_tensor(t2, device_mesh, [Shard(dim=0)]) # rowwise shard t2 on device mesh
-    dt3 = torch.mm(dt1, dt2)
-    assert isinstance(dt3, DTensor)
-    assert dt3.placements[0].is_partial() # product t3 is partial sharded on device mesh
-    dt4 = dt3.redistribute(device_mesh, [Replicate()]) # reshard t3 with allreduce to replicate
+## What is veScale DTensor? How's different from PyTorch DTensor?
 
-    # match DTensor and Tensor result
-    assert torch.equal(dt4.to_local(), t3) 
-    ```
+- veScale is a PyTorch-native framework rooted in _**PyTorch DTensor**_
 
-- More examples can be found under `<repo>/test/dtensor/*/*.py`
+- _**veScale DTensor**_ extends and enhances the _**PyTorch DTensor**_ for our production standard with extra features as below:
 
-- Original examples can be found in PyTorch [DTensor](https://github.com/pytorch/pytorch/tree/main/torch/distributed/_tensor).
+    - enabled "correct random ops" under abitrary sharding and uneven sharding, i.e., always guarantee random op sharded on multi device is equal to random op on a single device.
 
-## What is veScale DTensor?
-
-- veScale is a PyTorch native framework rooted in PyTorch DTensor
-
-- veScale DTensor has been and will be synchronizing with PyTorch DTensor 
-
-- veScale DTensor shares the majority of code of PyTorch DTensor, but extends it with extra features as below (i.e., major differences from PyTorch DTensor v2.2.0) for our production usage:
-
-    - enabled DTensor support for third-party plug-in ops (e.g., APEX) by unleashing `DTensor.data_ptr` and handling asynchronous collective tensors (e.g., in `from_local`, `to_local`, `redistribute`)
+    - enabled DTensor support for third-party plug-in ops (e.g., `APEX`) by unleashing `DTensor.data_ptr` and handling asynchronous collective tensors (e.g., in `from_local`, `to_local`, `redistribute`)
 
     - make implicit `_Partial` to explicit `Partial` placement for optimized initialization, output, and checkpoint (with an extra dispatch mode)
 
-    - enabled DTensor ops that were not implemented in PyTorch:
-        - `argmax` and `argmin`
+    - enabled DTensor ops that were not implemented in PyTorch for forward or/and backward:
+        - `argmax` 
+        - `argmin`
         - `topk`
         - `_unique2`
-        - `scatter_` and `scatter` 
+        - `scatter_` 
+        - `scatter` 
         - `select`
         - `alias`
-        - `index_put_` and `index_put`
+        - `index_put_` 
+        - `index_put` 
+        - `index_add_`
         - `_scaled_dot_product_flash_attention`
         - `_scaled_dot_product_efficient_attention`
+        - `expand_as`
+        - `one_hot`
+        - `where`
+        - `Embedding` in vocabular parallel
     
     - support uneven sharding in conversion between `DTensor` and `torch.Tensor`
 
@@ -105,10 +101,45 @@
 
     - [experimental] developed `InterleavedShard` placement to support merged QKV in MHA
 
+    - [experimental] extreme performance with C++ DTensor
+
+    - [experimental] extreme performance with dispatching-free DTensor
+
+## How to use veScale DTensor manually?
+
+- Example of `matmul`:
+
+    ``` python
+    # create a four-device mesh
+    device_mesh = DeviceMesh("cuda", [0, 1, 2, 3])
+
+    # single device matmul
+    t1 = torch.ones(12, 8, device="cuda")
+    t2 = torch.ones(8, 16, device="cuda")
+    t3 = torch.mm(t1, t2)
+
+    # multiple device matmul
+    dt1 = distribute_tensor(t1, device_mesh, [Shard(dim=1)]) # colwise shard (tensor dim 1) t1 along device mesh's dim 0
+    dt2 = distribute_tensor(t2, device_mesh, [Shard(dim=0)]) # rowwise shard (tensor dim 0) t2 along device mesh's dim 0
+    dt3 = torch.mm(dt1, dt2)
+    assert isinstance(dt3, DTensor)
+    assert dt3.placements[0].is_partial() # product t3 is partial sharded on device mesh
+    dt4 = dt3.redistribute(device_mesh, [Replicate()]) # reshard t3 with allreduce to replicate
+
+    # match DTensor and Tensor result
+    assert torch.equal(dt4.to_local(), t3) 
+    ```
+
+- APIs can be found under `<repo>/vescale/dtensor/api.py`
+
+- More examples can be found under `<repo>/test/dtensor/*/*.py`
+
+- Original examples can be found in PyTorch [DTensor](https://github.com/pytorch/pytorch/tree/main/torch/distributed/_tensor).
+
 
 ## What if encountering an operator that is not supported by DTensor yet?
 
--- Register DTensor "Ops" for Sharding Propagation!
+-- _Register DTensor "Ops" for Sharding Propagation!_
 
 ### Why register DTensor Ops for sharding propagation?
 
@@ -222,18 +253,33 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     
 ```
 
-## How to generate random numbers in DTensor as if it's from a single GPU
+## How to generate random numbers in DTensor as if it's from a single GPU?
 
-In veScale, we introduce a `ThreadBasedRNGTracker` for managing the RNG states across different GPUs.
-As a result, we can generate random DTensors that are identical to the ones from single GPUs.
-To use the feature, build and install a patched pytorch and set the environment variable `VESCALE_SINGLE_DEVICE_RAND=1`.
+### Motivation
+
+Ideally, DTensor should provide single-device abstraction even for random ops (e.g. `dtensor.randn`, `nn.Dropout`, and `<any random ops>`), i.e., random value generated on single device should be identical to collective of random shard on multiple devices.
 
 
-Whenever invoking a randomized operation on a DTensor, `ThreadBasedRNGTracker` passes its sharding info to the C++/Cuda side of pytorch through the RNG state.
-This resolves the issue that OffsetBasedRNGTracker does not produce the output identical to single GPU executions.
+### Problem 
+
+PyTorch DTensor (i.e., `OffsetBasedRNGTracker`) does not produce the random values on multiple devices identical to single GPU execution for random operators (e.g. `dtensor.randn`, `nn.Dropout`, and `<any random ops>`).
+
+The key problem lies in that the CUDA random numbers are not generated "sequentially" and cannot be simply offsetted by rank ids, but instead are generated "simultaneously" by multiple CUDA threads and only be sharded by CUDA thread ids! 
+
+### Solution
+
+In veScale, we introduce a `ThreadBasedRNGTracker` for correcting the RNG states across different GPUs, enabling generation of correct DTensor that are identical to the ones from single GPUs for any random ops.
+
+To use the feature, build and install a patched PyTorch of veScale and set the environment variable `VESCALE_SINGLE_DEVICE_RAND=1`.
+
+### Details
+
+Whenever invoking a randomized operation on a DTensor, `ThreadBasedRNGTracker` passes its sharding info to the C++/Cuda side of PyTorch through the RNG state.
+This resolves the issue that PyTorch DTensor's `OffsetBasedRNGTracker` does not produce the output identical to single GPU executions.
+
 For example, consider generating `x = torch.rand(4)` given the current random seed and
 a global offset. In Cuda's RNG implementation, random numbers are accessed via a triple
-(seed, thread id, offset).
+`(seed, thread id, offset)`.
 
 On a single GPU, 4 GPU threads is created and the i-th thread fills the entry `x[i]`
 with `rand(seed, i, offset)`. That is, we have
@@ -241,16 +287,14 @@ with `rand(seed, i, offset)`. That is, we have
     | Thread 0        | Thread 1        | Thread 2        | Thread 3        |
 x = | rand(0, offset) | rand(1, offset) | rand(2, offset) | rand(3, offset) |
 ```
-After the execution of torch.rand(4), the global offset increments by 4, which is the
+After the execution of `torch.rand(4)`, the global offset increments by 4, which is the
 granularity of cuda's RNG offsets.
 
 The global offset increments by the size of the randomness used in each thread, rounded
 up to the nearest multiple of 4. For instance, if 1000 GPU threads is used to generate
-7000 random numbers, each thread takes 7 random numbers from Cuda RNG and the global offset
-increases by 8 afterward.
+7000 random numbers, each thread takes 7 random numbers from Cuda RNG and the global offset increases by 8 afterward.
 
-However, using OffsetBasedRNGTracker along with an un-patched pytorch, it outputs a
-different tensor given 2 GPUs.
+However, using `OffsetBasedRNGTracker`, it outputs a different tensor given 2 GPUs.
 ```
     | GPU 0                                 | GPU 1                                     |
     | Thread 0 of GPU 0 | Thread 1 of GPU 0 | Thread 0 of GPU 1   | Thread 1 of GPU 1   |
@@ -268,3 +312,9 @@ x = | rand(seed, 0, offset) | rand(seed, 1, offset) | rand(seed, 2, offset) | ra
 And after the execution, the global offset should increment by 4.
 This can be done if we pass the sharding info into Cuda functions that generate these
 outputs.
+
+
+## Acknowledgement
+
+We would like to acknowledge the assistance of and collaboration with
+the [PyTorch DTensor team](https://github.com/pytorch/pytorch/tree/main/torch/distributed/_tensor).
