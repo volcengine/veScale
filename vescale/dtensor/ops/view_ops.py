@@ -681,7 +681,8 @@ def expand_as_prop(op_schema: OpSchema) -> OutputSharding:
         op=aten.expand.default, args_schema=(source, tuple(global_out_shape)), kwargs_schema=op_schema.kwargs_schema
     )
     expand_sharding_out = _reshape_prop(new_op_schema, ops[Tensor.expand])
-    expand_sharding_out.output_spec.placements = dst.placements
+    if any(p.is_shard() for p in dst.placements):
+        expand_sharding_out.output_spec.placements = dst.placements
     expand_sharding_out.needs_redistribute = False
     expand_sharding_out.suggested_schema = None
     return expand_sharding_out

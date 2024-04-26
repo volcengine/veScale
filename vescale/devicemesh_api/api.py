@@ -22,7 +22,7 @@ from vescale.dtensor.device_mesh import init_device_mesh, DeviceMesh
 from typing import Optional, List, Tuple, Union, Dict
 from torch.distributed.distributed_c10d import ProcessGroup
 
-__all__ = ["veDeviceMesh"]
+__all__ = ["VESCALE_DEVICE_MESH"]
 
 
 class VeDeviceMesh:
@@ -79,7 +79,7 @@ class VeDeviceMesh:
 
             check_uniqueness (bool): This advanced argument is used to prevent users from spoiling global
             DeviceMesh API by creating multiple copies in a large code repository.
-            Set to True to allow veDeviceMesh API to check the "global device mesh" is only initialized once.
+            Set to True to allow VESCALE_DEVICE_MESH API to check the "global device mesh" is only initialized once.
             Otherwise, users can create as many DeviceMeshes as they want just like with upstream Devicemesh.
 
         Returns:
@@ -90,13 +90,13 @@ class VeDeviceMesh:
 
         Example:
             >>> # xdoctest: +SKIP
-            >>> from vescale.devicemesh_api.device_mesh_api import veDeviceMesh
+            >>> from vescale.devicemesh_api import VESCALE_DEVICE_MESH
             >>>
-            >>> # Example 1: create a one-dimensional DeviceMesh
-            >>> mesh_1d = veDeviceMesh.init_device_mesh("cuda", mesh_shape=(8,))
+            >>> # Example 1: initialize the global DeviceMesh as a one-dimensional DeviceMesh
+            >>> VESCALE_DEVICE_MESH.init_device_mesh("cuda", mesh_shape=(8,))
             >>>
-            >>> # Example 2: create a two-dimensional DeviceMesh
-            >>> mesh_2d = veDeviceMesh.init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+            >>> # Example 2: re-initialize the global DeviceMesh as a two-dimensional DeviceMesh
+            >>> VESCALE_DEVICE_MESH.init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
 
         Limitation: we currently only support fixed sized DeviceMesh with 1 to 3 dimensions. We will loosen this constraint in future.
         """
@@ -199,15 +199,15 @@ class VeDeviceMesh:
             Coordinate of local rank mapped to the global DeviceMesh's parallel dimensions.
 
         Example:
-            >>> from vescale.devicemesh_api.device_mesh_api import veDeviceMesh
+            >>> from vescale.devicemesh_api import VESCALE_DEVICE_MESH
             >>> dp_size, tp_size = 2, 2
             >>> # Initialize global device mesh of (dp_size=2, tp_size=2)
-            >>> _ = veDeviceMesh.init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"))
+            >>> VESCALE_DEVICE_MESH.init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"))
             >>> local_rank = torch.distributed.get_rank() # local_rank is 0
                 0
-            >>> veDeviceMesh.get_strategy_coordinate(local_rank)
+            >>> VESCALE_DEVICE_MESH.get_strategy_coordinate(local_rank)
                 [0, 0]
-            >>> veDeviceMesh.get_strategy_coordinate(3)
+            >>> VESCALE_DEVICE_MESH.get_strategy_coordinate(3)
                 [1, 1]
         """
         assert self._GLOBAL_MESH, "Must initialize global DeviceMesh first!"
@@ -230,19 +230,19 @@ class VeDeviceMesh:
             Specified parallel strategy 'rank' of a global rank.
 
         Example:
-            >>> from vescale.devicemesh_api.device_mesh_api import veDeviceMesh
+            >>> from vescale.devicemesh_api import VESCALE_DEVICE_MESH
             >>> dp_size, tp_size = 2, 2
             >>> # Initialize global device mesh of (dp_size=2, tp_size=2)
-            >>> _ = veDeviceMesh.init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"))
+            >>> VESCALE_DEVICE_MESH.init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("DP", "TP"))
             >>> local_rank = torch.distributed.get_rank() # local_rank = 0
                 0
-            >>> veDeviceMesh.get_strategy_coordinate(local_rank)
+            >>> VESCALE_DEVICE_MESH.get_strategy_coordinate(local_rank)
                 [0, 0]
             >>> index = 1
-            >>> veDeviceMesh.lookup_rank(index) # local_rank is 0
+            >>> VESCALE_DEVICE_MESH.lookup_rank(index) # local_rank is 0
                 0
             >>> dim_name = "DP"
-            >>> veDeviceMesh.lookup_rank(dim_name) # local_rank is 0
+            >>> VESCALE_DEVICE_MESH.lookup_rank(dim_name) # local_rank is 0
                 0
         """
         assert self._GLOBAL_MESH, "Must initialize global DeviceMesh first!"
@@ -472,4 +472,4 @@ class VeDeviceMesh:
         return tuple(device_mesh.mesh.shape)
 
 
-veDeviceMesh = VeDeviceMesh()
+VESCALE_DEVICE_MESH = VeDeviceMesh()

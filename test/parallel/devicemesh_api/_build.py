@@ -20,7 +20,7 @@ from parallel.devicemesh_api._model import GPT
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.dmodule.api import parallelize_module
-from vescale.devicemesh_api import veDeviceMesh
+from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 
 
 def system_setup():
@@ -65,26 +65,32 @@ def prepare_config_and_data():
     return model_args, data_set
 
 
-def build_gpt_model_and_optimizer(gptconf, init_method, dp_size, tp_size, sharding_plan, use_dist_optimizer=False):
+def build_gpt_model_and_optimizer(
+    gptconf, init_method, dp_size, tp_size, sharding_plan, use_dist_optimizer=False, device_type="cuda"
+):
     if init_method == "scratch":
         model = GPT(gptconf).bfloat16()
     else:
         model = GPT.from_pretrained(init_method, dict(dropout=0.0)).bfloat16()
 
-    device_mesh = veDeviceMesh.init_device_mesh(
-        "cuda",
+    VESCALE_DEVICE_MESH.init_device_mesh(
+        device_type,
         mesh_shape=(dp_size, tp_size),
         mesh_dim_names=("DP", "TP"),
     )
     if tp_size > 1:
         # Enable tensor parallelism
-        model = parallelize_module(model, device_mesh["TP"], sharding_plan)
-    else:
+        model = parallelize_module(model, VESCALE_DEVICE_MESH["TP"], sharding_plan)
+    elif device_type == "cuda":
         model.to("cuda")
 
     if dp_size > 1:
         # Enable data Parallel
-        dp_comm = veDeviceMesh["DP"] if veDeviceMesh.ndim > 1 else veDeviceMesh.get_data_parallel_dim_groups()
+        dp_comm = (
+            VESCALE_DEVICE_MESH["DP"]
+            if VESCALE_DEVICE_MESH.ndim > 1
+            else VESCALE_DEVICE_MESH.get_data_parallel_dim_groups()
+        )
         model = DDP(
             model,
             data_pg_or_device_mesh=dp_comm,
@@ -98,7 +104,11 @@ def build_gpt_model_and_optimizer(gptconf, init_method, dp_size, tp_size, shardi
 
     # Build distributed optimizer
     if use_dist_optimizer and tp_size > 1:
-        dp_comm = veDeviceMesh["DP"] if veDeviceMesh.ndim > 1 else veDeviceMesh.get_data_parallel_dim_groups()
+        dp_comm = (
+            VESCALE_DEVICE_MESH["DP"]
+            if VESCALE_DEVICE_MESH.ndim > 1
+            else VESCALE_DEVICE_MESH.get_data_parallel_dim_groups()
+        )
         optimizer = DistributedOptimizer(
             optimizer,
             clip_grad=0.0,
@@ -112,4 +122,17 @@ def build_gpt_model_and_optimizer(gptconf, init_method, dp_size, tp_size, shardi
             models=[model],
         )
 
-    return model, optimizer, device_mesh
+    return model, optimizer, VESCALE_DEVICE_MESH.get()
+
+
+def prepare_data(bsz, hidden_dim, dtype=torch.float, device_type="cuda"):
+    x1, y1 = torch.rand(bsz, hidden_dim, dtype=dtype), torch.rand(bsz, hidden_dim, dtype=dtype)
+    x2, y2 = torch.rand(bsz, hidden_dim, dtype=dtype), torch.rand(bsz, hidden_dim, dtype=dtype)
+    x3, y3 = torch.rand(bsz, hidden_dim, dtype=dtype), torch.rand(bsz, hidden_dim, dtype=dtype)
+    x4, y4 = torch.rand(bsz, hidden_dim, dtype=dtype), torch.rand(bsz, hidden_dim, dtype=dtype)
+    if device_type == "cuda":
+        x1, y1 = x1.cuda(), y1.cuda()
+        x2, y2 = x2.cuda(), y2.cuda()
+        x3, y3 = x3.cuda(), y3.cuda()
+        x4, y4 = x4.cuda(), y4.cuda()
+    return [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]

@@ -11,6 +11,7 @@
 import contextlib
 import warnings
 from typing import Dict, List, Optional, Tuple
+from math import prod
 
 import os
 import torch
@@ -19,6 +20,7 @@ from torch import Tensor
 
 from vescale.dtensor.device_mesh import _get_device_handle, DeviceMesh
 from vescale.dtensor.placement_types import DTensorSpec, Shard
+from vescale.dtensor._utils import compute_local_shape_and_global_offset
 
 _rng_tracker: Optional["RNGStateTracker"] = None
 
@@ -318,8 +320,6 @@ class OffsetBasedRNGTracker(RNGStateTracker):
         """
         dtensor_shape = spec.shape
 
-        from vescale.dtensor.ops.utils import prod
-
         numel = prod(dtensor_shape)
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
@@ -390,6 +390,14 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
     def __init__(self, device_type: str = "cuda"):
         super().__init__(device_type)
+        # source: aten/src/ATen/native/cuda/DistributionTemplates.h
+        self.block_size = 256
+        self.unroll = 4
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        # For example, in an A100: props.max_threads_per_multi_processor = 2048, props.multi_processor_count = 108
+        self.max_threads_per_multi_processor = props.max_threads_per_multi_processor
+        self.blocks_per_sm = self.max_threads_per_multi_processor // self.block_size
+        self.max_grid = props.multi_processor_count * self.blocks_per_sm
 
     def get_offset(self, name: str) -> int:
         if name not in self.rng_states:
@@ -423,29 +431,17 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         )
 
     def set_sharding_spec(
-        self, name: str, sharding_spec: Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]
+        self,
+        name: str,
+        sharding_spec: Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]],
+        offset: int,
     ) -> None:
         if name not in self.rng_states:
             raise RuntimeError(f"{self.__class__.__name__} does not have random state for {name}")
 
-        local_shape, global_offset, global_shape, global_strides = sharding_spec
-
         seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = (self.rng_states[name])[8:16]
-        local_shape_tensor = torch.tensor(local_shape).view(torch.uint8)
-        global_offset_tensor = torch.tensor(global_offset).view(torch.uint8)
-        global_shape_tensor = torch.tensor(global_shape).view(torch.uint8)
-        global_strides_tensor = torch.tensor(global_strides).view(torch.uint8)
-        self.rng_states[name] = torch.cat(
-            [
-                seed_tensor,
-                offset_tensor,
-                local_shape_tensor,
-                global_offset_tensor,
-                global_shape_tensor,
-                global_strides_tensor,
-            ]
-        )
+        spec_tensor = torch.tensor(sum(sharding_spec, start=(offset,))).view(torch.uint8)
+        self.rng_states[name] = torch.cat([seed_tensor, spec_tensor])
 
     @contextlib.contextmanager
     def _distribute_region(self, spec: DTensorSpec):
@@ -457,7 +453,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             )
         if self.distribute_region_enabled:
             old_offset = self.get_offset("parallel-rng")
-            self._set_pre_op_sharding_spec(spec)
+            self._set_pre_op_sharding_spec(spec, old_offset)
             with torch.random.fork_rng(self._devices, device_type=self._device_type):
                 self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
                 try:
@@ -468,7 +464,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         else:
             yield
 
-    def _set_pre_op_sharding_spec(self, spec: DTensorSpec) -> None:
+    def _set_pre_op_sharding_spec(self, spec: DTensorSpec, old_offset: int) -> None:
         """Passing the DTensor sharding info via Cuda RNG State. Later on,
         each GPU thread can use the info to deduce the correct thread id and
         offset when generating an entry of a DTensor.
@@ -483,19 +479,22 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         .. warning::
             Note that, current implementation does not consider DTensor's continguity.
         """
-        global_shape = spec.shape
-        mesh = spec.mesh
+        if spec.num_shards > 0:
+            global_shape = spec.shape
+            mesh = spec.mesh
 
-        from vescale.dtensor._utils import compute_local_shape_and_global_offset
+            local_shape, global_offset = compute_local_shape_and_global_offset(global_shape, mesh, spec.placements)
+            global_strides = spec.tensor_meta.stride
 
-        local_shape, global_offset = compute_local_shape_and_global_offset(global_shape, mesh, spec.placements)
-        global_strides = spec.tensor_meta.stride
+            if (local_shape, global_offset) == ((), ()):  # a out-of-mesh rank
+                local_shape = tuple([0] * len(global_shape))
+                global_offset = tuple([0] * len(global_shape))
 
-        if (local_shape, global_offset) == ((), ()):  # a out-of-mesh rank
-            local_shape = tuple([0] * len(global_shape))
-            global_offset = tuple([0] * len(global_shape))
-
-        self.set_sharding_spec("parallel-rng", (local_shape, global_offset, global_shape, global_strides))
+            self.set_sharding_spec(
+                "parallel-rng",
+                (local_shape, global_offset, global_shape, global_strides),
+                old_offset,
+            )
 
     def _set_post_op_offset(self, spec: DTensorSpec, old_offset: int) -> None:
         """Set the RNG state as the DTensor operation is executed on a single GPU. This
@@ -511,20 +510,12 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         """
         dtensor_shape = spec.shape
 
-        from vescale.dtensor.ops.utils import prod
-
         numel = prod(dtensor_shape)
 
-        # source: aten/src/ATen/native/cuda/DistributionTemplates.h
-        block_size = 256
-        unroll = 4
-        props = torch.cuda.get_device_properties(spec.mesh.device_type)
-        # For example, in an A100: props.max_threads_per_multi_processor = 2048, props.multi_processor_count = 108
-        blocks_per_sm = props.max_threads_per_multi_processor // block_size
-        grid_x = min(props.multi_processor_count * blocks_per_sm, (numel + block_size - 1) // block_size)
-        offset_incr = ((numel - 1) // (block_size * grid_x * unroll) + 1) * unroll
-        self.set_offset("parallel-rng", old_offset + offset_incr)
-        self.set_sharding_spec("parallel-rng", ((), (), (), ()))
+        grid_x = min(self.max_grid, (numel + self.block_size - 1) // self.block_size)
+        offset_incr = ((numel - 1) // (self.block_size * grid_x * self.unroll) + 1) * self.unroll
+        new_offset = old_offset + offset_incr
+        self.set_sharding_spec("parallel-rng", ((), (), (), ()), new_offset)
 
 
 class TensorParallelRNGTracker(RNGStateTracker):

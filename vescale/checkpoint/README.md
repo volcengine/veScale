@@ -1,4 +1,4 @@
-# vescale.checkpoint
+# veScale Checkpoint
 
 `vescale.checkpoint` is an automatic distributed checkpointing system for LLM training and inference.
 
@@ -29,20 +29,24 @@ abstracting away the complexities of underlying details such as process rank and
 
 - Saving checkpoint: 
 
-```
+```python
 # prepare checkpoint state for the model and optimizer
 checkpoint_state = { "model": distributed_model, "optimizer": distributed_optimizer }
 # save the checkpoint
 vescale.checkpoint.save("/user/vescale/gpt/", checkpoint_state)
 ```
+
 - Loading checkpoint (under different world size or 3D parallelism degrees):
-```
+
+```python
 # prepare checkpoint state for the model and optimizer
 checkpoint_state = { "model": distributed_model, "optimizer": distributed_optimizer }
 # load the checkpoint
 vescale.checkpoint.load("/user/vescale/gpt/", checkpoint_state)
 ```
 
-- More examples can be found under `<repo>/test/checkpoint` and `<repo>/examples`.
+- APIs can be found in: `<repo>/vescale/checkpoint/__init__.py`
+
+- More examples can be found under `<repo>/test/checkpoint/*.py` and `<repo>/examples/`
 
 - Original examples can be found in PyTorch [Distributed Checkpoint](https://github.com/pytorch/pytorch/tree/main/torch/distributed/checkpoint)

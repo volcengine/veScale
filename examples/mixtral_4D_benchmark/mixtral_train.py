@@ -40,10 +40,13 @@ def estimate_mixtral(config, bsz, sqence_length):
     embed = 4 * bsz * sqence_length * config.hidden_size
     # MixtralMoE consists of 3 linear layers.
     ff = 3 * 2 * config.num_experts_per_tok * config.hidden_size * config.intermediate_size * bsz * sqence_length
-    attn_qkv = 2 * bsz * sqence_length * config.hidden_size * 3 * config.hidden_size
+    # GQA
+    head_size = config.hidden_size // config.num_attention_heads
+    attn_q = 2 * bsz * sqence_length * config.hidden_size * config.hidden_size
+    attn_kv = 2 * 2 * bsz * sqence_length * config.hidden_size * config.num_key_value_heads * head_size
     attn_mask = 2 * sqence_length * config.hidden_size
-    attn_proj = 2 * config.hidden_size * config.intermediate_size * bsz * sqence_length
-    attn = attn_qkv + attn_mask + attn_proj
+    attn_proj = 2 * config.hidden_size * config.hidden_size * bsz * sqence_length
+    attn = attn_q + attn_kv + attn_mask + attn_proj
     return embed + (ff + attn) * config.num_hidden_layers
 
 

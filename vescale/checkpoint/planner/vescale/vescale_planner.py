@@ -35,7 +35,7 @@ from .vescale_planner_helpers import (
     find_state_dict_object,
 )
 
-from vescale.devicemesh_api import veDeviceMesh
+from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 
 logger: logging.Logger = logging.getLogger(__file__)
 
@@ -230,7 +230,7 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                                 op=dist.irecv,
                                 tensor=recv_tensor,
                                 peer=k,
-                                group=veDeviceMesh.get_data_parallel_dim_groups(),
+                                group=VESCALE_DEVICE_MESH.get_data_parallel_dim_groups(),
                             )
                             recv_tensors[k] = recv_tensor
                             p2p_ops.append(recv_op)
@@ -241,7 +241,7 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                         op=dist.isend,
                         tensor=obj.local_tensor,
                         peer=writer_rank,
-                        group=veDeviceMesh.get_data_parallel_dim_groups(),
+                        group=VESCALE_DEVICE_MESH.get_data_parallel_dim_groups(),
                     )
                     p2p_ops.append(send_op)
 

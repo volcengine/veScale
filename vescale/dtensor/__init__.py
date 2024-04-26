@@ -334,7 +334,7 @@ def rand(
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with random numbers from an uniform distribution
-        with mean 0 and variance 1. The global shape of the tensor is defined by the variable
+        on the interval [0, 1]. The global shape of the tensor is defined by the variable
         argument ``size``.
     It will be on device type of device mesh; presetting default cuda rank is a must.
 

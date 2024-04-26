@@ -33,7 +33,7 @@ import torch
 from torch.distributed import broadcast, all_reduce, barrier, init_process_group, destroy_process_group, get_rank
 
 from model import GPTConfig, GPT
-from vescale.devicemesh_api.device_mesh_api import veDeviceMesh
+from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 
 from vescale import distribute_tensor
 from vescale.dmodule.api import parallelize_module
@@ -114,7 +114,7 @@ def main():
         torch.cuda.set_device(device)
         init_process_group(backend=backend, world_size=world_size, rank=rank)
 
-        mesh = veDeviceMesh.init_device_mesh(device, (dp_size, tp_size), mesh_dim_names=["DP", "TP"])
+        VESCALE_DEVICE_MESH.init_device_mesh(device, (dp_size, tp_size), mesh_dim_names=["DP", "TP"])
         ddp_rank = get_rank() // tp_size
     else:
         rank = 0
@@ -162,8 +162,8 @@ def main():
         else:
             x, y = x.to(device), y.to(device)
         if ddp:
-            x = distribute_tensor(x, mesh["TP"], [Replicate()])
-            y = distribute_tensor(y, mesh["TP"], [Replicate()])
+            x = distribute_tensor(x, VESCALE_DEVICE_MESH["TP"], [Replicate()])
+            y = distribute_tensor(y, VESCALE_DEVICE_MESH["TP"], [Replicate()])
         return x, y
 
     # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -235,10 +235,10 @@ def main():
 
     # + + + parallelize the model and wrap it with DDP using veScale APIs
     if ddp:
-        model = parallelize_module(model, mesh["TP"], nanoGPT_plan)
+        model = parallelize_module(model, VESCALE_DEVICE_MESH["TP"], nanoGPT_plan)
         model = DDP(
             model,
-            data_pg_or_device_mesh=mesh["DP"],
+            data_pg_or_device_mesh=VESCALE_DEVICE_MESH["DP"],
             accumulate_allreduce_grads_in_fp32=DDP_grads_in_fp32,
             overlap_grad_reduce=False,
             use_distributed_optimizer=use_DO,
