@@ -47,7 +47,7 @@ Furthermore, **veScale** is also developing a _Mixed Mode_* of partial _Eager_ a
 **veScale** is designed and implemented on top of a primitive called _DTensor_ that provides a global tensor semantic with local shards distributed on multiple devices.
 **veScale** extends and enhances the _PyTorch DTensor_ for our production standard, and further develops the _Auto-Plan*_ and _Auto-Paralleize_ with a unified configuration and API. 
 
-Furthermore, **veScale** also supports online _Auto-Reshard_ for distributed checkpoints, which will be open-sourced as a new project -- **OmniStore**.
+Furthermore, **veScale** also supports online _Auto-Reshard_ for distributed checkpoints.
 
 (`*` is under development)
 

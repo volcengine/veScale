@@ -21,8 +21,6 @@ abstracting away the complexities of underlying details such as process rank and
 
 `vescale.checkpoint` incorporates [fast checkpointing](https://arxiv.org/abs/2402.15627) and various I/O optimization techinques, enhancing I/O efficiency during LLM training.  
 
-`vescale.checkpoint` will be a part of `OmniStore` project, a new open-source project coming soon.
-
 `vescale.checkpoint` is built on top of `PyTorch Distributed Checkpoint` with significant differences as discussed above.
 
 ## How to use `vescale.checkpoint`?
