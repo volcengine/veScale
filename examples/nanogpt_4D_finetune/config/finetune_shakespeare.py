@@ -45,3 +45,7 @@ max_iters = 20
 # finetune at constant LR
 learning_rate = 3e-5
 decay_lr = False
+
+dropout = 0.1
+compile = False
+use_dist_dropout = True

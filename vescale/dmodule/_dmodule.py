@@ -269,6 +269,7 @@ class DModule:
         Non-appointed parameters and buffers will be `Replicate` (i.e., default plan).
         """
         assert DModule.has_all_attributes(module)
+        device_type = module._device_mesh.device_type
         # pre-order traverse root and submodules
         for submod_path, submod in module.named_modules():
             # get assigned plans from root
@@ -282,6 +283,8 @@ class DModule:
                 if param_pi.placements is None:  # default plan
                     param_pi.placements = [Replicate()] * module._device_mesh.ndim
                 param = DModule._distribute_parameter(param, module._device_mesh, param_pi, is_sharded)
+                # force to put param on given device, like cuda.
+                param = torch.nn.Parameter(param.data.to(device_type))
                 submod.register_parameter(param_name, param)
 
             # distribute immediate buffers
@@ -292,6 +295,8 @@ class DModule:
                 if buffer_pi.placements is None:  # default plan
                     buffer_pi.placements = [Replicate()] * module._device_mesh.ndim
                 buffer = DModule._distribute_parameter(buffer, module._device_mesh, buffer_pi, is_sharded)
+                # force to put buffer on given device, like cuda.
+                buffer = buffer.to(device_type)
                 submod.register_buffer(buffer_name, buffer)
 
     @staticmethod
@@ -394,24 +399,22 @@ class DModule:
         if not fqn_submods:
             return
 
-        # verifiy that there is no nested submodule for factory dispatch mode
-        fqns = [fqn for fqn, _ in fqn_submods]
-        for fqn in fqns:
-            for other_fqn in fqns:
-                if fqn == other_fqn:
-                    continue
-                if other_fqn.startswith(fqn):
-                    raise NotImplementedError(
-                        f"Nested submodules for dtensorizing factory is not supported yet: `{fqn}` and `{other_fqn}`!"
-                    )
-
-        # normalize appointed factory, wrap the forward with factory dispatch mode
+        # turns off factory for all model patches as the highest override (inner most wrapper)
+        from vescale.model.patch.utils import is_patched
         from vescale.dmodule._factory import wrap_factory_mode
 
+        for submod in module.modules():
+            if is_patched(submod):
+                wrap_factory_mode(False, submod)
+
+        # normalize appointed factory, wrap the forward with factory dispatch mode
         for fqn, submod in fqn_submods:
             factory_placement: Union[bool, Dict] = factory[type(submod)]
+
             if not factory_placement:  # False or {}
+                wrap_factory_mode(False, submod)
                 continue
+
             if factory_placement is True:
                 factory_pi = {}  # all factories as default placement
             else:  # Dict
@@ -420,7 +423,7 @@ class DModule:
                     for f, p in factory_placement.items()
                 }
                 factory_pi = {f: p for f, p in factory_pi.items() if p is not None}
-            wrap_factory_mode(submod, module._device_mesh, factory_pi)
+            wrap_factory_mode(True, submod, module._device_mesh, factory_pi)
 
     """ ============ Bound Methods Below ============ """
 
@@ -516,7 +519,7 @@ class DModule:
                 if param_str.endswith(", "):
                     param_str = param_str[:-2]
                 param_str += ")"
-            elif isinstance(param.data, nn.Tensor):
+            elif isinstance(param.data, torch.Tensor):
                 param_str = "TensorParam("
                 if show_shape:
                     param_str += f"shape={param.data.shape}, "

@@ -13,11 +13,18 @@ import torch
 from vescale.dtensor import DeviceMesh
 from vescale.dtensor.op_schema import OpSchema, OpStrategy, PlacementStrategy, StrategyType
 from vescale.dtensor.ops.utils import register_op_strategy, is_tensor_partial
+from vescale.dtensor.placement_types import DTensorSpec, Partial, Replicate
 
 aten = torch.ops.aten
 
 
-@register_op_strategy([aten.normal_.default, aten.uniform_.default])
+@register_op_strategy(
+    [
+        aten.normal_.default,
+        aten.uniform_.default,
+        aten.bernoulli_.float,
+    ]
+)
 def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     self_strategy = op_schema.args_schema[0]
     assert isinstance(self_strategy, OpStrategy)
@@ -26,14 +33,26 @@ def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     for arg_strategy in self_strategy.strategies:
         arg_spec = arg_strategy.output_spec
         if is_tensor_partial(arg_spec):
-            # TODO: figure out how inplace random op should behave when it's partial
-            raise RuntimeError(f"{op_schema.op} with Partial is not supported yet!")
-        random_strategy.strategies.append(PlacementStrategy(output_spec=arg_spec))
+            # if the arg_spec have partial, accept partial
+            # in the input_specs but output replicate for
+            # those corresponding mesh dims
+
+            output_spec = DTensorSpec(
+                mesh=arg_spec.mesh,
+                placements=tuple(Replicate() if isinstance(p, Partial) else p for p in arg_spec.placements),
+            )
+            random_strategy.strategies.append(
+                PlacementStrategy(
+                    output_spec=output_spec,
+                    input_specs=(arg_spec,),
+                )
+            )
+        else:
+            random_strategy.strategies.append(PlacementStrategy(output_spec=arg_spec))
 
     return random_strategy
 
 
-# (Hongyu) allow partial placements for dropout
 @register_op_strategy(aten.native_dropout.default)
 def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     self_strategy = op_schema.args_schema[0]

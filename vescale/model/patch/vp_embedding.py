@@ -32,6 +32,8 @@ from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.placement_types import Partial, Replicate
 
+from .utils import is_patched, set_patched
+
 
 class VocabParallelEmbedding:
     @staticmethod
@@ -116,8 +118,10 @@ class VocabParallelEmbedding:
                         )
                         continue
 
+            assert not is_patched(submod), "VocabParallelEmbedding should only be patched once!"
             # replace nn.Linear's forward with customized forward.
             submod.forward = MethodType(
                 partial(VocabParallelEmbedding.forward, device_mesh=submod.weight.device_mesh),
                 submod,
             )
+            set_patched(submod)

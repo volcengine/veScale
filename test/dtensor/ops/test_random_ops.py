@@ -21,7 +21,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed.distributed_c10d import broadcast_object_list
 
-from vescale import DeviceMesh, DTensor, Shard, Replicate, distribute_tensor
+from vescale import DeviceMesh, DTensor, Shard, Partial, Replicate, distribute_tensor
 import vescale.dtensor.random as random
 from vescale.dtensor.random import is_rng_supported_mesh, manual_seed
 from vescale.dtensor import empty as dempty
@@ -38,8 +38,7 @@ class DTensorRandomInitTest(DTensorTestBase):
             device_mesh = DeviceMesh(self.device_type, mesh_shape)
             all_shapes = [(8, 4), (4, 4, 4), (8, 8, 4, 4), (5, 6, 7, 8, 9)]
             for global_shape in all_shapes:
-                all_placements = [Replicate()] + [Shard(d) for d in range(len(global_shape))]
-
+                all_placements = [Replicate(), Partial()] + [Shard(d) for d in range(len(global_shape))]
                 from itertools import product
 
                 all_placements = [list(placements) for placements in product(all_placements, repeat=mesh_dim)]
@@ -63,14 +62,16 @@ class DTensorRandomInitTest(DTensorTestBase):
                     else:
                         torch.cuda.manual_seed_all(0)
                         expected_tensor = init_op(torch.empty(*global_shape, device="cuda"), *args, **kwargs)
-                        dist_expected = distribute_tensor(expected_tensor, device_mesh, placements)
-
+                        dist_expected = distribute_tensor(expected_tensor.detach().clone(), device_mesh, placements)
                         manual_seed(0, device_mesh)
                         dtensor = init_op(
                             dempty(*global_shape, device_mesh=device_mesh, placements=placements), *args, **kwargs
                         )
-                        self.assertTrue(list(dtensor._spec.placements) == placements)
-                        self.assertEqual(dtensor._local_tensor, dist_expected._local_tensor, atol=0.0, rtol=0.0)
+                        if any(p.is_partial() for p in placements):
+                            self.assertTrue(all(not p.is_partial() for p in dtensor._spec.placements))
+                        else:
+                            self.assertTrue(list(dtensor._spec.placements) == placements)
+                            self.assertEqual(dtensor._local_tensor, dist_expected._local_tensor, atol=0.0, rtol=0.0)
                         full_tensor = dtensor.full_tensor()
                         self.assertEqual(full_tensor, expected_tensor, atol=0.0, rtol=0.0)
 
@@ -110,17 +111,18 @@ class DTensorRandomOpTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "different seed values"):
             manual_seed(self.rank, device_mesh)
 
-    def run_dropout(self, global_shape, mesh, placements):
+    def run_dropout(self, global_shape, mesh, placements, inplace):
         torch.cuda.manual_seed_all(0)
-        dropout = torch.nn.Dropout(p=0.2)
+        dropout = torch.nn.Dropout(p=0.2, inplace=inplace)
         expected_tensor = dropout(torch.ones(global_shape, device=self.device_type))
-        dist_expected = distribute_tensor(expected_tensor, mesh, placements)
+        dist_expected = distribute_tensor(expected_tensor.detach().clone(), mesh, placements)
 
         manual_seed(0, mesh)
         dtensor = distribute_tensor(torch.ones(global_shape, device=self.device_type), mesh, placements)
         dtensor = dropout(dtensor)
 
-        self.assertEqual(dtensor.to_local(), dist_expected.to_local(), atol=0.0, rtol=0.0)
+        if all(not p.is_partial() for p in placements):
+            self.assertEqual(dtensor._local_tensor, dist_expected._local_tensor, atol=0.0, rtol=0.0)
         full_tensor = dtensor.full_tensor()
         self.assertEqual(full_tensor, expected_tensor, atol=0.0, rtol=0.0)
 
@@ -131,12 +133,29 @@ class DTensorRandomOpTest(DTensorTestBase):
         shapes = [(9, 7), (4, 16, 16), (7, 5, 16)]
         mesh = DeviceMesh("cuda", torch.arange(self.world_size))
         for global_shape in shapes:
-            for placements in ([Replicate()], [Shard(0)], [Shard(1)]):
-                self.run_dropout(global_shape, mesh, placements)
+            for placements in [[Replicate()], [Partial()], [Shard(0)], [Shard(1)]]:
+                self.run_dropout(global_shape, mesh, placements, inplace=True)
+                self.run_dropout(global_shape, mesh, placements, inplace=False)
         mesh = DeviceMesh("cuda", torch.arange(self.world_size).reshape(self.world_size // 2, 2))
         for global_shape in shapes:
-            for shard in ([Replicate(), Replicate()], [Shard(0), Shard(1)], [Shard(1), Shard(0)]):
-                self.run_dropout(global_shape, mesh, placements)
+            for placements in [
+                [Shard(0), Shard(1)],
+                [Shard(0), Replicate()],
+                [Shard(0), Partial()],
+                [Shard(1), Shard(0)],
+                [Shard(1), Replicate()],
+                [Shard(1), Partial()],
+                [Replicate(), Shard(0)],
+                [Replicate(), Shard(1)],
+                [Replicate(), Partial()],
+                [Replicate(), Replicate()],
+                [Partial(), Shard(0)],
+                [Partial(), Shard(1)],
+                [Partial(), Partial()],
+                [Partial(), Replicate()],
+            ]:
+                self.run_dropout(global_shape, mesh, placements, inplace=True)
+                self.run_dropout(global_shape, mesh, placements, inplace=False)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -152,26 +171,26 @@ class DTensorRandomOpTest(DTensorTestBase):
         placements_list = [  # this list of placements should be enough to cover
             [Shard(0), Shard(1)],
             [Shard(0), Replicate()],
-            # [Shard(0), Partial()],
+            [Shard(0), Partial()],
             [Shard(1), Shard(0)],
             [Shard(1), Replicate()],
-            # [Shard(1), Partial()],
+            [Shard(1), Partial()],
             [Replicate(), Shard(0)],
             [Replicate(), Shard(1)],
-            # [Replicate(), Partial()],
+            [Replicate(), Partial()],
             [Replicate(), Replicate()],
-            # [Partial(), Shard(0)],
-            # [Partial(), Shard(1)],
-            # [Partial(), Partial()],
-            # [Partial(), Replicate()],
-        ]  # TODO: Add Partials in the future
+            [Partial(), Shard(0)],
+            [Partial(), Shard(1)],
+            [Partial(), Partial()],
+            [Partial(), Replicate()],
+        ]
 
         for placements in placements_list:
             torch.manual_seed(0)
             torch.cuda.manual_seed_all(0)
             golden = torch.empty(*[self.world_size for _ in mesh.size()], device=self.device_type)
             golden.uniform_(0, 1)
-            dist_golden = distribute_tensor(golden, device_mesh, placements)
+            dist_golden = distribute_tensor(golden.detach().clone(), device_mesh, placements)
 
             manual_seed(0, device_mesh)
             dtensor = distribute_tensor(
@@ -181,7 +200,11 @@ class DTensorRandomOpTest(DTensorTestBase):
             )
             dtensor.uniform_(0, 1)
 
-            self.assertEqual(dtensor.to_local(), dist_golden.to_local(), atol=0.0, rtol=0.0)
+            if any(p.is_partial() for p in placements):
+                self.assertTrue(all(not p.is_partial() for p in dtensor._spec.placements))
+            else:
+                self.assertTrue(list(dtensor._spec.placements) == placements)
+                self.assertEqual(dtensor._local_tensor, dist_golden._local_tensor, atol=0.0, rtol=0.0)
             full_tensor = dtensor.full_tensor()
             self.assertEqual(full_tensor, golden, atol=0.0, rtol=0.0)
 

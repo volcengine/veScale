@@ -136,13 +136,16 @@ def parallelize_module(
                     - `True`: all submodules and all factory funcs will be converted to DTensor in `Replicate`.
                     - `False` or `{}`: disable this factory function conversion to DTensor.
                     - `{ submodule_cls : True }`: only this `submodule_cls`'s all factory function will be converted to DTensor in `Replicate`.
-                    - `{ submodule_cls : False or [] }`: exclude this `submodule_cls` for factory function conversion to DTensor.
+                    - `{ submodule_cls : False or {} }`: exclude this `submodule_cls` for factory function conversion to DTensor.
                     - `{ submodule_cls : { factory_func : <sharding placements> } }`: only this `submodule_cls`'s `factory_func` will be converted to DTensor in `<sharding placements>`.
+
+                Nested Case: `{ submodule_cls_outer : True/False/{..}, submodule_cls_inner : True/False/{..} }` can have `submodule_cls_inner` nested in `submodule_cls_outer`,
+                            in which case we let the inner `submodule_cls_inner` overrides `submodule_cls_outer` in `True/False/{..}`, i.e., like a context manager in Python.
 
                 Note: Currently, this factory converison:
                     - only covers `forward()`
                     - assumes same <sharding placements> for `factory_func`
-                    - does NOT support nested `submodule_cls`
+                    - won't be affected by other TorchDispatchMode
 
     Returns:
         (Optional) this parallelized model instance
@@ -211,12 +214,34 @@ def parallelize_module(
                 self.fc2 = nn.Linear(8, 8)
 
             def forward(self, x):
-                x = torch.zeros(x.shape)
+                x = torch.zeros(x.shape) # to be converted to DTensor zeros during runtime
                 x = self.fc1(x)
                 x = self.fc2(x)
                 return x
 
         dmlp = parallelize_module(MLP(), ..., factory=True) # or factory = { MLP: {torch.zeros: [Replicate()]} }
+
+    Example:: using factory for nested classes
+
+        class MLP(nn.Module):
+            ...
+
+            def forward(self, x):
+                x = torch.zeros(x.shape) # to be converted to DTensor in Shard
+                ...
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = MLP()
+
+            def forward(self, x):
+                x = torch.zeros(x.shape) # to be converted to DTensor in Replicate
+                x = self.mlp(x)
+                return x
+
+        dmlp = parallelize_module(MLP(), ..., factory={ Block : {torch.zeros: [Replicate()]}
+                                                        MLP: {torch.zeros: [Shard(0)]} }) # inner class overrides
 
     Example:: using gradient synchronization with customized target
 

@@ -485,14 +485,16 @@ class DTensorSpec:
         # and int >=0 represent shard on that device mesh dim
         r = [-1] * self.ndim
         for i, placement in enumerate(self.placements):
-            if placement.is_shard() or placement.is_interleaved_shard():
+            if placement.is_shard():
                 shard_dim = placement.dim
-                if r[shard_dim] > -1:
-                    raise ValueError(
-                        f"Tensor dim {shard_dim} is already sharded on mesh dim {r[shard_dim]},"
-                        " DTensor operator implementation does not support things like hybrid"
-                        " sharding strategies yet (i.e. [Shard(0), Shard(0)])"
-                    )
+                # NOTE: this might lead to other problems, pay attention.
+                # relax this check, allow shard one tensor dim twice.
+                # if r[shard_dim] > -1:
+                #     raise ValueError(
+                #         f"Tensor dim {shard_dim} is already sharded on mesh dim {r[shard_dim]},"
+                #         " DTensor operator implementation does not support things like hybrid"
+                #         " sharding strategies yet (i.e. [Shard(0), Shard(0)])"
+                #     )
                 r[shard_dim] = i
         return r
 
@@ -553,3 +555,9 @@ class DTensorSpec:
         return True if the current DTensorSpec replicates on all mesh dims (devices)
         """
         return all(placement.is_replicate() for placement in self.placements)
+
+    def is_partial(self):
+        """
+        return True if the current DTensorSpec is partial on all mesh dims (devices)
+        """
+        return len(self.placements) == 1 and self.placements[0].is_partial()

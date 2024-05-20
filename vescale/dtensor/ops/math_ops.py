@@ -31,7 +31,7 @@ from vescale.dtensor.ops.utils import (
     register_op_strategy,
     register_prop_rule,
 )
-from vescale.dtensor.placement_types import DTensorSpec, Partial, Placement, Replicate, Shard
+from vescale.dtensor.placement_types import DTensorSpec, Partial, Placement, Replicate, Shard, InterleavedShard
 
 aten = torch.ops.aten
 
@@ -93,13 +93,17 @@ def map_placements_after_reduction(
         else:
             assert isinstance(placement, Shard)
             shard_dim = placement.dim
+            interleaved_size = getattr(placement, "interleaved_size", None)
             new_shard_dim = reduction_dims_map[shard_dim]
             if new_shard_dim == -1 or shard_dim in reduction_dims:
                 # if new_shard_dim collapsed or its in the reduction dims
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(Partial(reduction_op))
             else:
-                new_placements.append(Shard(reduction_dims_map[shard_dim]))
+                if interleaved_size is None:
+                    new_placements.append(Shard(reduction_dims_map[shard_dim]))
+                else:
+                    new_placements.append(InterleavedShard(reduction_dims_map[shard_dim], interleaved_size))
     return tuple(new_placements)
 
 

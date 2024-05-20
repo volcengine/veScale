@@ -18,79 +18,56 @@
 import functools
 import os
 from typing import Callable
+import logging
 
-from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode, _push_mode
 
 
-VESCALE_PARTIAL_MODE = os.environ.get("VESCALE_PARTIAL_MODE", "0") == "1"
 VESCALE_DISABLE_REDISTRIBUTE = os.environ.get("VESCALE_DISABLE_REDISTRIBUTE", "1") == "1"
 
 global VESCALE_SHARDING_SUGGETSION
 VESCALE_SHARDING_SUGGETSION = []
 
 
-def switch_partial_mode(func: Callable):
+def dummy_p2p(func: Callable):
     @functools.wraps(func)
     def wrap(*args, **kwargs):
-        global VESCALE_PARTIAL_MODE
-        if VESCALE_PARTIAL_MODE:
-            with EnablePartialMode():
-                out = func(*args, **kwargs)
+        global VESCALE_DUMMY_P2P
+        if VESCALE_DUMMY_P2P:
+            msg = f"{get_rank()}: {args}"
+            logging.info(msg)
         else:
+            if VESCALE_DUMP_INSTRUCTION:
+                if vescale_file_to_dump is not None:
+                    vescale_file_to_dump.write(f"=========================\nrank:{get_rank()}: {args}, {kwargs}\n")
+                    vescale_file_to_dump.flush()
+                    msg = f"rank:{get_rank()}: {args}, {kwargs}\n=======================\n"
+                    logging.info(msg)
             out = func(*args, **kwargs)
-        return out
+            if VESCALE_DUMP_INSTRUCTION:
+                if vescale_file_to_dump is not None:
+                    vescale_file_to_dump.write(f"output: {out}\n")
+                    vescale_file_to_dump.flush()
+                    msg = f"output: {out}\n"
+                    logging.info(msg)
+            return out
 
     return wrap
 
 
-class EnablePartialMode(TorchDispatchMode):
-    """
-    To enable the DTensor to be PartialSum for performance
-    By sometimes, we find there have some optimization chance
-    for partial state, so we enable to get a partial DTensor
-    by torch ops
+def manage_dump_file(func: Callable):
+    @functools.wraps(func)
+    def wrap(*args, **kwargs):
+        if VESCALE_DUMP_INSTRUCTION:
+            with open(f"instruction-{get_rank()}.txt", "w+") as file:
+                global vescale_file_to_dump
+                vescale_file_to_dump = file
+                out = func(*args, **kwargs)
+        else:
+            out = func(*args, **kwargs)
 
-    chance one: adjust the reshard AllReduceReassociate
-    The AllReduceReassociate can be simplify
-    allreduce(x) + allreduce(y) to allreduce(x + y),
-    there will be some alllreduce save for partial activation
+        return out
 
-    Note:
-        EnablePartialMode only influence the xxx_like op porpagation
-        rules. if you want this mode affect some other function, maybe
-        refer to ```switch_partial_mode``` , by wrapper any function
-        with ```@switch_partial_mode``` there will be also tracked by
-        EnablePartialMode
-
-    Usage:
-        ```
-        from vescale.dtensor.dispatch import EnablePartialMode
-        with EnablePartialMode():
-            partial_tensor = torch.ones_like(other)
-        ```
-    """
-
-    @staticmethod
-    def _enable():
-        global VecaleParitalMode
-        VecaleParitalMode = True
-
-    @staticmethod
-    def _disable():
-        global VecaleParitalMode
-        VecaleParitalMode = False
-
-    def __enter__(self):
-        EnablePartialMode._enable()
-        _push_mode(self, self.__dict__.get("_dispatch_key", None))
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        EnablePartialMode._disable()
-        _pop_mode(self.__dict__.get("_dispatch_key", None))
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        return func(*args, **kwargs)
+    return wrap
 
 
 class DeferReshardMode:

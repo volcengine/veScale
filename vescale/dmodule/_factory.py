@@ -19,10 +19,17 @@ from typing import Callable, Optional, Tuple, Dict
 import warnings
 from inspect import signature
 import functools
+import contextlib
 
 import torch
 from torch import nn
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _pop_mode,
+    _push_mode,
+    _len_torch_dispatch_stack,
+    _get_current_dispatch_mode_stack,
+)
 
 from vescale import dtensor
 from vescale.dtensor.placement_types import Replicate
@@ -42,21 +49,15 @@ FACTORY_ATEN_DFACTORY = {
     torch.empty: (aten.empty.memory_format, dtensor.empty),
     torch.full: (aten.full.default, dtensor.full),
     torch.randn: (aten.randn.default, dtensor.randn),
+    torch.rand: (aten.rand.default, dtensor.rand),
     torch.arange: ((aten.arange.default, aten.arange.start, aten.arange.start_step), dtensor.arange),
 }
 
 
-class FactoryDispatchMode(TorchDispatchMode):
-    def __init__(
-        self,
-        _dispatch_key=None,
-        device_mesh: DeviceMesh = None,
-        aten_dfactory_pi: Dict[Callable, Tuple[Callable, PI]] = None,
-    ):
-        super().__init__(_dispatch_key)
-        assert device_mesh is not None
+class FactoryDispatchModeOn(TorchDispatchMode):
+    def __init__(self, device_mesh: DeviceMesh, aten_dfactory_pi: Dict[Callable, Tuple[Callable, PI]]):
+        super().__init__()
         self.device_mesh = device_mesh
-        assert aten_dfactory_pi is not None
         self.aten_dfactory_pi = aten_dfactory_pi
 
     def __torch_dispatch__(self, func: Callable, _, args: Tuple, kwargs: Optional[Dict] = None):
@@ -134,8 +135,52 @@ def _provide_args(device_mesh: DeviceMesh, factory_pi: Dict[Callable, PI]) -> Di
     return aten_dfactory_pi
 
 
-def _provide_wrapped_forward(
-    origin_forward: Callable, device_mesh: DeviceMesh, aten_dfactory_pi: Dict[Callable, Tuple[Callable, PI]]
+@contextlib.contextmanager
+def FactoryDispatchModeOff():  # ref: `torch.utils._python_dispatch._disable_current_modes()`
+    # --- enter ---
+    saved_idx, saved_mode, saved_len = None, None, None
+    # turn off the lastest mode from the top of stack
+    if any(isinstance(_mode, FactoryDispatchModeOn) for _mode in _get_current_dispatch_mode_stack()):
+        saved_len = _len_torch_dispatch_stack()
+        _tmp_stack = []
+        _idx = saved_len - 1
+        while _idx >= 0:
+            _mode: TorchDispatchMode = _pop_mode()
+            if isinstance(_mode, FactoryDispatchModeOn):
+                saved_idx, saved_mode = _idx, _mode
+                break
+            else:
+                _tmp_stack.append(_mode)
+                _idx -= 1
+        while _tmp_stack:
+            _push_mode(_tmp_stack.pop())
+        assert _len_torch_dispatch_stack() == saved_len - 1, "Only one mode should be poped!"
+    # ------
+    try:
+        yield
+    # --- exit ---
+    finally:
+        # restore the saved mode at the original idx in the stack
+        if saved_idx is not None:
+            _tmp_stack = []
+            _idx = saved_len - 1
+            while _idx >= 0:
+                if _idx == saved_idx:
+                    _push_mode(saved_mode)
+                    break
+                else:
+                    _tmp_stack.append(_pop_mode())
+                    _idx -= 1
+            while _tmp_stack:
+                _push_mode(_tmp_stack.pop())
+            assert _len_torch_dispatch_stack() == saved_len, "Stack should be restored!"
+    # ------
+
+
+def _provide_wrapped_forward_on(
+    origin_forward: Callable,
+    device_mesh: DeviceMesh,
+    aten_dfactory_pi: Dict[Callable, Tuple[Callable, PI]],
 ):
     # new forward
     @functools.wraps(origin_forward)  # copy signatures
@@ -143,11 +188,31 @@ def _provide_wrapped_forward(
         if _IS_DEBUG:
             print(f"[DEBUG] forward({args}, {kwargs})")
             print(f"[DEBUG] signature(forward): {signature(forward)}")
-            # assert that arguments are correct
-            signature(forward).bind(*args, **kwargs)
+            signature(forward).bind(*args, **kwargs)  # assert that arguments are correct
             print(f"[DEBUG] origin_forward({args}, {kwargs})")
-        # call original forward under factory mode
-        with FactoryDispatchMode(device_mesh=device_mesh, aten_dfactory_pi=aten_dfactory_pi):
+        # call original forward
+        with FactoryDispatchModeOff():  # isolate this factory mode on, in case of nest modes
+            with FactoryDispatchModeOn(device_mesh, aten_dfactory_pi):
+                return origin_forward(*args, **kwargs)
+
+    if _IS_DEBUG:
+        print(f"[DEBUG] signature(origin_forward): {signature(origin_forward)}")
+        print(f"[DEBUG] signature(forward): {signature(forward)}")
+
+    return forward
+
+
+def _provide_wrapped_forward_off(origin_forward: Callable):
+    # new forward
+    @functools.wraps(origin_forward)  # copy signatures
+    def forward(*args, **kwargs):
+        if _IS_DEBUG:
+            print(f"[DEBUG] forward({args}, {kwargs})")
+            print(f"[DEBUG] signature(forward): {signature(forward)}")
+            signature(forward).bind(*args, **kwargs)  # assert that arguments are correct
+            print(f"[DEBUG] origin_forward({args}, {kwargs})")
+        # call original forward
+        with FactoryDispatchModeOff():
             return origin_forward(*args, **kwargs)
 
     if _IS_DEBUG:
@@ -157,14 +222,23 @@ def _provide_wrapped_forward(
     return forward
 
 
-def wrap_factory_mode(mod: nn.Module, device_mesh: DeviceMesh, factory_pi: Dict[Callable, PI]) -> None:  # noqa: B006
-    # prepare args to factory mode (put here to avoid runtime overhead)
-    aten_dfactory_pi = _provide_args(device_mesh, factory_pi)
+def wrap_factory_mode(
+    on: bool, mod: nn.Module, device_mesh: Optional[DeviceMesh] = None, factory_pi: Optional[Dict[Callable, PI]] = None
+) -> None:  # noqa: B006
+    if on:  # turn on factory mode
+        assert device_mesh is not None
+        assert factory_pi is not None
 
-    # wrap forward with factory mode
-    # NOTE: bound method with `MethodType` will disable signature (either set by `__signature__` or `@functools.wraps``),
-    # which disables forward hooks appointed by forward plan (as `(x,) != (*args, **kwargs)` )
-    # so we use unbound method here to keep the same signature
-    mod.forward = _provide_wrapped_forward(mod.forward, device_mesh, aten_dfactory_pi)
+        # prepare args to factory mode (put here to avoid runtime overhead)
+        aten_dfactory_pi = _provide_args(device_mesh, factory_pi)
+
+        # wrap forward with factory mode
+        # NOTE: bound method with `MethodType` will disable signature (either set by `__signature__` or `@functools.wraps``),
+        # which disables forward hooks appointed by forward plan (as `(x,) != (*args, **kwargs)` )
+        # so we use unbound method here to keep the same signature
+        mod.forward = _provide_wrapped_forward_on(mod.forward, device_mesh, aten_dfactory_pi)
+    else:  # turn off factory mode
+        mod.forward = _provide_wrapped_forward_off(mod.forward)
+
     if _IS_DEBUG:
         print(f"[DEBUG] signature(mod.forward): {signature(mod.forward)}")

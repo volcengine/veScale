@@ -31,6 +31,8 @@ from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.placement_types import Partial, Replicate
 
+from .utils import is_patched, set_patched
+
 
 def _get_vocab_range(per_partition_vocab_size: int, rank, world_size: int) -> Sequence[int]:
     index_f = rank * per_partition_vocab_size
@@ -237,8 +239,10 @@ class VocabParallelCrossEntropy:
                         )
                         continue
 
+            assert not is_patched(submod), "VocabParallelCrossEntropy should only be patched once!"
             # replace nn.Linear's forward with customized forward.
             submod.forward = MethodType(
                 partial(VocabParallelCrossEntropy.forward, device_mesh=None),
                 submod,
             )
+            set_patched(submod)

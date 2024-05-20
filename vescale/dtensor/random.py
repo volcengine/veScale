@@ -24,7 +24,7 @@ from vescale.dtensor._utils import compute_local_shape_and_global_offset
 
 _rng_tracker: Optional["RNGStateTracker"] = None
 
-USE_THREAD_RNG_TRACKER = os.environ.get("VESCALE_SINGLE_DEVICE_RAND", "0") == "1"
+USE_THREAD_RNG_TRACKER = os.environ.get("VESCALE_SINGLE_DEVICE_RAND", "1") == "1"
 
 
 def init_vescale_rng_tracker(device_type: str = "cuda"):

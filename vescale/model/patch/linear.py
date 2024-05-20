@@ -26,6 +26,8 @@ from vescale.dtensor.dtensor import DTensor
 from vescale.dtensor.placement_types import Shard
 from vescale.dmodule.placements_interface import PlacementsInterface
 
+from .utils import is_patched, set_patched
+
 
 def make_new_row_parallel_linear_forward(device_mesh: DeviceMesh, out_pi: PlacementsInterface):
     r"""
@@ -108,15 +110,14 @@ class RowParallelLinear:
             assert isinstance(submod.bias, DTensor)
             assert isinstance(output_pis, Sequence) and len(output_pis) == 1, "Linear has only a single output!"
             out_pi = output_pis[0]
-            assert (
-                out_pi.placements and isinstance(out_pi.placements, Sequence) and len(out_pi.placements) == 1
-            ), "Only 1D sharding is considered now!"
+            assert out_pi.placements and isinstance(out_pi.placements, Sequence)
             if any(p.is_partial() for p in submod.bias.placements) or any(p.is_partial() for p in out_pi.placements):
                 warnings.warn(
                     f"`{submod_path}` is a Row Parallel Linear with `Partial` bias/output, which can cause undefined result in Adam Optimizer.",
                     UserWarning,
                 )
 
+            assert not is_patched(submod), "RowParallelLinear should only be patched once!"
             # replace nn.Linear's forward with customized forward.
             # NOTE: dyanmo doesn't support functools now, use function closure instead.
             # TODO: collaborate with upstream to support functools
@@ -124,3 +125,4 @@ class RowParallelLinear:
                 make_new_row_parallel_linear_forward(device_mesh=submod.weight.device_mesh, out_pi=out_pi),
                 submod,
             )
+            set_patched(submod)
