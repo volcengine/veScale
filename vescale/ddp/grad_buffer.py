@@ -58,6 +58,7 @@ class Bucket:
         self.params_list = params
         self.params = set(params)
         self.params_with_grad = set()
+        self.whitelist_params = set()
         self.data = data
         # The distributed optimizer needs to keep track of this bucket's offset
         # within the full grad_buffer.
@@ -76,6 +77,7 @@ class Bucket:
         Reset metadata in bucket in preparation for the next iteration of training.
         """
         self.params_with_grad = set()
+        self.whitelist_params = set()
         self.communication_handle = None
         self.partial_grad_communication_handle = None
         self.communication_issued = False
@@ -163,8 +165,9 @@ class Bucket:
         if self.communication_handle is None or (not self.communication_issued):
             warnings.warn(
                 f"DDP Bucket expects {len(self.params)} params all having .grad"
-                f"but gets {len(self.params_with_grad)} grad available."
-                f"This may be due to unused model parameters. "
+                f"but gets {len(self.params_with_grad)} grad available, "
+                f"and gets {len(self.whitelist_params - self.params_with_grad)} params marked as absent in backward."
+                f"This may be due to unused and unmarked model parameters. "
                 "We issue blocking communication for this bucket after other overlapped communications."
             )
             self.start_grad_sync()
@@ -172,6 +175,7 @@ class Bucket:
         assert self.communication_handle is not None and self.communication_issued, (
             f"Communication call has not been issued for this bucket "
             f"({len(self.params_with_grad)}/{len(self.params)} params have grad available)"
+            f"({len(self.whitelist_params - self.params_with_grad)}/{len(self.params)} params have grad marked as absent in backward)"
         )
         self.communication_handle.wait()
 
@@ -186,8 +190,23 @@ class Bucket:
         assert param not in self.params_with_grad, "Cannot set grad twice"
         assert self.overlap_grad_reduce, "register_grad_ready() should be called only when overlapping grad reduce"
         self.params_with_grad.add(param)
-        # If all params in bucket have grads available, issue communication call.
-        if len(self.params_with_grad) == len(self.params):
+        # If all params in bucket have grads available or marked as absent in backward, issue communication call.
+        if len(self.params_with_grad.union(self.whitelist_params)) == len(self.params):
+            self.start_grad_sync()
+
+    def register_grad_maybe_absent(self, param: torch.nn.Parameter):
+        """
+        Registers grads for the passed-in param to be "ready" for grad sync.
+
+        NOTE: This API should only be called when there is a sparse model structure, like MOE.
+        """
+        assert param in self.params, "Param is not in the bucket"
+        assert self.overlap_grad_reduce, "register_grad_ready() should be called only when overlapping grad reduce"
+        if param in self.params_with_grad:
+            return
+        self.whitelist_params.add(param)
+        # If all params in bucket have grads available or marked as absent in backward, issue communication call.
+        if len(self.params_with_grad.union(self.whitelist_params)) == len(self.params):
             self.start_grad_sync()
 
     def register_partial_grad_ready(
@@ -462,3 +481,14 @@ class GradBuffer:
         """
         bucket = self.param_to_bucket[param]
         bucket.register_partial_grad_ready(param, model_parallel_device_mesh, placements)
+
+    def register_grad_maybe_absent(self, param: torch.nn.Parameter):
+        """
+        Registers grads for the passed-in param to be "ready" for grad sync.
+
+        NOTE: This API should only be called when there is a sparse model structure, like MOE.
+        """
+        assert self.overlap_grad_reduce, "register_grad_ready() should only be called when overlap_grad_reduce is True"
+        if self.is_last_microbatch:
+            bucket = self.param_to_bucket[param]
+            bucket.register_grad_maybe_absent(param)

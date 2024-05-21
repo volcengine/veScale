@@ -36,24 +36,29 @@ python3 base_train.py config/finetune_shakespeare.py --compile=False
 
 ## Loss Curves
 
-Here are the training Loss and validation loss curves plot for fp32 runs that last 200 iterations:
+Here are the training loss curves plot for fp32 runs that last 20 iterations:
 
-![figure](./figures/nanoGPT_finetune_4d_val_loss_fp32_200.jpg)
-
-
-![figure](./figures/nanoGPT_finetune_4d_train_loss_fp32_200.jpg)
+![figure](./figures/nanoGPT_train_losses_fp32.jpg)
 
 For the bf16 runs, in `base_train.py`, instead of using `torch.amp.autocast`, we cast the model to bf16 directly and both the gradients and the optimizer states are casted to bf16 automatically. For a fair comparison, we modify veScale to store both the gradients and the optimizer state in bf16 instead of fp32.
 
-![figure](./figures/nanoGPT_finetune_4d_forcebf16_val_loss_bf16_200.jpg)
 
+![figure](./figures/nanoGPT_train_losses.jpg)
 
-![figure](./figures/nanoGPT_finetune_4d_forcebf16_train_loss_bf16_200.jpg)
 
 ## Difference from the upstream nanoGPT
 
-1. When training with bf16 (`--dtype='bfloat16'`), the model is casted to bf16 and we remove the usage of `amp.autocast`.
-2. Sampling mini-batches is done at the 0th rank and the indices is later broadcasted to other ranks. This ensures that both `base_train.py` and `finetune_4D.py` works on the identical batch every iteration.
+1. veScale enables EXACT single-device abstraction for multiple device training, where even random operator (e.g., Dropout) with Tensor Parallel achieves exact training loss as a single device training. This is achieved via our veScale DTensor and patched torch. Without veScale DTensor, upstream DTensor does NOT provide single device semantics on random operators. The comparison is as follows:
+
+
+![figure](./figures/nanoGPT_drand_train_losses.jpg)
+
+
+In this figure, the `1GPU_fp32` curve is shifted in y-axis by 0.01 in order to distinguish it from the `4GPU_TP4_veScale` curve.
+
+2. When training with bf16 (`--dtype='bfloat16'`), the model is casted to bf16 and we remove the usage of `amp.autocast`.
+
+3. Sampling mini-batches is done at the 0th rank and the indices is later broadcasted to other ranks. This ensures that both `base_train.py` and `finetune_4D.py` works on the identical batch every iteration.
 
 ## Caveats
 

@@ -4,7 +4,7 @@
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
-from typing import Dict, Union
+from typing import Dict, Union, List, Any
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -38,6 +38,7 @@ class DistributedDataParallel(torch.nn.Module):
             per bucket _if_ overlap_grad_reduce is True and pp_rank is 0.
         bucket_size (int): the size of single bucket, only useful when bucketing is enabled. By default,
             40000000.
+        whitelist_module_types (List[Type]): Types of sparse submodules. By default, None.
 
     Returns:
         A :class:`DistributedDataParallel` object.
@@ -55,7 +56,8 @@ class DistributedDataParallel(torch.nn.Module):
         mlp = parallelize_module(MLP(), mesh, ..., ...)
         ddp_module = DDP(
             module=mlp,
-            data_pg_or_device_mesh=mesh
+            data_pg_or_device_mesh=mesh,
+            whitelist_module_types=[MoEBlock]
         )
         # run the forward.
         ddp_module(torch.rand(xxx))
@@ -71,6 +73,7 @@ class DistributedDataParallel(torch.nn.Module):
         use_distributed_optimizer: bool = False,
         disable_bucketing: bool = False,
         bucket_size: int = 40000000,  # Unit: number of the elements
+        whitelist_module_types: List[Any] = None,
         **kwargs,
     ):
         super().__init__()
@@ -166,6 +169,18 @@ class DistributedDataParallel(torch.nn.Module):
                 grad_acc.register_hook(self._make_param_hook(param, self.param_to_grad_buffer))
                 self.grad_accs.append(grad_acc)
 
+        # Register backward hook for submodules of sparse structure.
+        if whitelist_module_types is not None and self.overlap_grad_reduce:
+            for submod in self.module.modules():
+                is_sparse = False
+                for t in whitelist_module_types:
+                    if isinstance(submod, t):
+                        is_sparse = True
+                        break
+                if not is_sparse:
+                    continue
+                submod.register_forward_pre_hook(self._make_sparse_module_pre_hook(), prepend=True)
+
     def forward(self, *inputs, **kwargs):
         """
         Calls the wrapped module's forward() method.
@@ -207,6 +222,31 @@ class DistributedDataParallel(torch.nn.Module):
                     param_to_grad_buffer[param].register_grad_ready(param)
 
         return param_hook
+
+    def _make_sparse_module_backward_hook(self, sparse_module, param_to_grad_buffer):
+        """
+        Creates the all-reduce / reduce-scatter hook for back propagation of sparse Modules, like MOE.
+        """
+
+        def backward_hook(*unused):
+            # we do nothing if not overlap_grad_reduce.
+            if not self.overlap_grad_reduce:
+                return
+            # force to mark all parameters in the sparse_module as ready for allreduce
+            # once we found the back propagation of the module is finished.
+            for param in sparse_module.parameters():
+                param_to_grad_buffer[param].register_grad_maybe_absent(param)
+
+        return backward_hook
+
+    def _make_sparse_module_pre_hook(self):
+        def sparse_module_pre_hook(module, args):
+            for x in args:
+                if isinstance(x, torch.Tensor) and x.requires_grad:
+                    x.register_hook(self._make_sparse_module_backward_hook(module, self.param_to_grad_buffer))
+                    break
+
+        return sparse_module_pre_hook
 
     def start_grad_sync(self, *unused):
         """

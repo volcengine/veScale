@@ -84,7 +84,7 @@ def compute_local_shape_and_global_offset(
 
         for idx, placement in enumerate(placements):
             mesh_dim_size = mesh.size(idx)
-            if isinstance(placement, (Shard, InterleavedShard)):
+            if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
                 assert shard_dim < len(

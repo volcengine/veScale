@@ -33,6 +33,7 @@ class BypassOpDispatch:
         self.op_handlers = {
             aten.linear.default: BypassOpDispatch.decompose_handler,
             aten.is_same_size.default: BypassOpDispatch.is_same_size_handler,
+            aten.nonzero.default: BypassOpDispatch.nonzero_handler,
         }
 
     def apply(
@@ -73,6 +74,31 @@ class BypassOpDispatch:
         rhs = cast(torch.Tensor, args[1])
         return lhs.shape == rhs.shape
 
+    @staticmethod
+    def nonzero_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ) -> object:
+        from vescale.dtensor import DTensor
+
+        input_ = kwargs.get("input", args[0])
+        assert isinstance(input_, DTensor)
+        input_spec = input_._spec
+        all_replicate = all(p.is_replicate() for p in input_spec.placements)
+        assert all_replicate, "input placement has to be replicate"
+        input_local = input_._local_tensor
+        output_local = op_call(input_local)
+        return DTensor(
+            local_tensor=output_local,
+            device_mesh=input_spec.mesh,
+            placements=input_spec.placements,
+            shape=output_local.shape,
+            dtype=output_local.dtype,
+            requires_grad=output_local.requires_grad,
+            stride=output_local.stride(),
+        )
+
 
 _bypass_op_dispatch = BypassOpDispatch()
 
@@ -98,7 +124,6 @@ class BypassOpShardingProp:
             aten._to_copy.default: BypassOpShardingProp.copy_handler,
             aten._local_scalar_dense.default: BypassOpShardingProp.scalar_handler,
             aten.equal.default: BypassOpShardingProp.scalar_handler,
-            aten.nonzero.default: BypassOpShardingProp.nonzero_handler,
         }
 
     def apply(self, op_info: OpInfo) -> bool:
@@ -108,31 +133,6 @@ class BypassOpShardingProp:
             return True
         else:
             return False
-
-    @staticmethod
-    def nonzero_handler(op_info: OpInfo) -> OutputSharding:
-        """
-        Bypass nonzero because the output shape is dynamic.
-        We allow only replication on the input/ouput.
-        """
-        op_schema = op_info.schema
-        input_spec = op_schema.args_schema[0]
-        all_replicate = all(p.is_replicate() for p in input_spec.placements)
-        assert all_replicate, "input placement has to be replicate"
-        input_local = op_info.local_args[0]
-        output_local = torch.nonzero(input_local)
-        out_tensor_meta = TensorMeta(
-            shape=output_local.shape,
-            stride=output_local.stride(),
-            dtype=output_local.dtype,
-        )
-        return OutputSharding(
-            output_spec=DTensorSpec(
-                mesh=op_info.schema.args_spec[0].mesh,
-                placements=op_info.schema.args_spec[0].placements,
-                tensor_meta=out_tensor_meta,
-            )
-        )
 
     @staticmethod
     def copy_handler(op_info: OpInfo) -> OutputSharding:

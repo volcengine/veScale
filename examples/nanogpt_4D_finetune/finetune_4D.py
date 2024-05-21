@@ -41,8 +41,9 @@ from vescale.dtensor.placement_types import Replicate
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 from vescale.optim.base_optimizer import BasicOptimizer, GradOptimizerHookBase
-from sharding_plan import nanoGPT_plan
+from sharding_plan import nanoGPT_plan, nanoGPT_plan_dist_dropout
 import vescale
+from vescale.dtensor.random import manual_seed
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -95,6 +96,7 @@ tp_size = 1
 DDP_grads_in_fp32 = True
 save_checkpoint_path = "./nanogpt_checkpoint_dir"
 load_checkpoint_path = ""
+use_dist_dropout = True
 config = {}
 
 
@@ -115,6 +117,7 @@ def main():
         init_process_group(backend=backend, world_size=world_size, rank=rank)
 
         VESCALE_DEVICE_MESH.init_device_mesh(device, (dp_size, tp_size), mesh_dim_names=["DP", "TP"])
+        mesh = VESCALE_DEVICE_MESH.get()
         ddp_rank = get_rank() // tp_size
     else:
         rank = 0
@@ -124,15 +127,17 @@ def main():
     # world_size number of processes will be training simultaneously, so we can scale
     # down the desired gradient accumulation iterations per process proportionally
     master_process = rank == 0  # this process will do logging, checkpointing etc.
-    seed_offset = ddp_rank  # each process gets a different see
     assert batch_size % dp_size == 0
     local_batch_size = batch_size // dp_size
     tokens_per_iter = gradient_accumulation_steps * dp_size * local_batch_size * block_size
-    print(f"tokens per iteration will be: {tokens_per_iter:,}")
+    if master_process:
+        print(f"tokens per iteration will be: {tokens_per_iter:,}")
+        print(f"Use new distributed random: {os.environ.get('VESCALE_SINGLE_DEVICE_RAND', '1')}")
 
     if master_process:
         os.makedirs(out_dir, exist_ok=True)
-    torch.manual_seed(1337 + seed_offset)
+    torch.manual_seed(1337)
+    manual_seed(1337, mesh)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
     device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
@@ -235,7 +240,9 @@ def main():
 
     # + + + parallelize the model and wrap it with DDP using veScale APIs
     if ddp:
-        model = parallelize_module(model, VESCALE_DEVICE_MESH["TP"], nanoGPT_plan)
+        model = parallelize_module(
+            model, VESCALE_DEVICE_MESH["TP"], nanoGPT_plan_dist_dropout if use_dist_dropout else nanoGPT_plan
+        )
         model = DDP(
             model,
             data_pg_or_device_mesh=VESCALE_DEVICE_MESH["DP"],

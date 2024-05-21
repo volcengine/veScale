@@ -275,6 +275,71 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(input_tensor, dtensor.to_local())
         self.assertEqual(expected, dt.to_local())
 
+    def test_mul_placements(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(self.rank)
+        input_size = (8, 4)
+        input_tensor = torch.randn(*input_size, device=self.device_type)
+        input_dtensor = DTensor.from_local(input_tensor, device_mesh, [Replicate()])
+
+        other_tensor = torch.randn(*input_size, device=self.device_type)
+        other_dtensor = DTensor.from_local(other_tensor, device_mesh, [Replicate()])
+        expected = torch.mul(input_tensor, other_tensor)
+
+        # test R mul P
+        input_dtensor = input_dtensor.redistribute(device_mesh, [Replicate()])
+        other_dtensor = other_dtensor.redistribute(device_mesh, [Partial()])
+        output_dtensor = torch.mul(input_dtensor, other_dtensor)
+        output_dtensor = output_dtensor.redistribute(device_mesh, [Replicate()])
+        self.assertEqual(expected, output_dtensor.to_local())
+
+        # test P mul R
+        input_dtensor = input_dtensor.redistribute(device_mesh, [Partial()])
+        other_dtensor = other_dtensor.redistribute(device_mesh, [Replicate()])
+        output_dtensor = torch.mul(input_dtensor, other_dtensor)
+        output_dtensor = output_dtensor.redistribute(device_mesh, [Replicate()])
+        self.assertEqual(expected, output_dtensor.to_local())
+
+        # test P mul P
+        failed = False
+        try:
+            input_dtensor = input_dtensor.redistribute(device_mesh, [Partial()])
+            other_dtensor = other_dtensor.redistribute(device_mesh, [Partial()])
+            output_dtensor = torch.mul(input_dtensor, other_dtensor)
+            output_dtensor = output_dtensor.redistribute(device_mesh, [Replicate()])
+        except Exception as e:
+            failed = True
+        self.assertEqual(failed, True, msg="pointwise P mul P should fail")
+
+    def test_div_placements(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(self.rank)
+        input_size = (8, 4)
+        input_tensor = torch.randn(*input_size, device=self.device_type)
+        input_dtensor = DTensor.from_local(input_tensor, device_mesh, [Replicate()])
+
+        other_tensor = torch.randn(*input_size, device=self.device_type)
+        other_dtensor = DTensor.from_local(other_tensor, device_mesh, [Replicate()])
+        expected = torch.div(input_tensor, other_tensor)
+
+        # test P div R
+        input_dtensor = input_dtensor.redistribute(device_mesh, [Partial()])
+        other_dtensor = other_dtensor.redistribute(device_mesh, [Replicate()])
+        output_dtensor = torch.div(input_dtensor, other_dtensor)
+        output_dtensor = output_dtensor.redistribute(device_mesh, [Replicate()])
+        self.assertEqual(expected, output_dtensor.to_local())
+
+        # test R div P
+        failed = False
+        try:
+            input_dtensor = input_dtensor.redistribute(device_mesh, [Replicate()])
+            other_dtensor = other_dtensor.redistribute(device_mesh, [Partial()])
+            output_dtensor = torch.div(input_dtensor, other_dtensor)
+            output_dtensor = output_dtensor.redistribute(device_mesh, [Replicate()])
+        except Exception as e:
+            failed = True
+        self.assertEqual(failed, True, msg="pointwise R div P should fail")
+
     def test_triu(self):
         device_mesh = self.build_device_mesh()
         input_size = (8, 4)

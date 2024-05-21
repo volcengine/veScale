@@ -124,6 +124,7 @@ def materialize_dtensor(
     placements: Tuple[Placement] = normalize_placements(
         placements, device_mesh.ndim, tensor_ndim=tensor.ndim, none_as_replicate=True
     )
+    has_shard_placement = any(p.is_shard() for p in placements)
     # get local tensor shape
     local_shape = compute_local_shape(global_shape, device_mesh, placements)
     torch_device = torch.device(device)
@@ -139,9 +140,19 @@ def materialize_dtensor(
             random._rng_tracker = random.init_vescale_rng_tracker()
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):
-            tensor = _C.materialize_tensor_with_local_shape(tensor, local_shape, torch_device)
+            # shortcut for parameters with no shard placements. TODO: what about Partial sharding
+            if not has_shard_placement:
+                tensor = _C.materialize_tensor(tensor)
+                tensor = tensor.to(device)
+            else:
+                tensor = _C.materialize_tensor_with_local_shape(tensor, local_shape, torch_device)
     else:
-        tensor = _C.materialize_tensor_with_local_shape(tensor, local_shape, torch_device)
+        # shortcut for parameters with no shard placements. TODO: what about Partial sharding
+        if not has_shard_placement:
+            tensor = _C.materialize_tensor(tensor)
+            tensor = tensor.to(device)
+        else:
+            tensor = _C.materialize_tensor_with_local_shape(tensor, local_shape, torch_device)
     # wrap as dtensor
     return DTensor(
         local_tensor=tensor,
@@ -184,6 +195,7 @@ def materialize_dparameter(
     placements: Tuple[Placement] = normalize_placements(
         placements, device_mesh.ndim, tensor_ndim=param.data.ndim, none_as_replicate=True
     )
+    has_shard_placement = any(p.is_shard() for p in placements)
     # get local tensor shape
     local_shape = compute_local_shape(global_shape, device_mesh, placements)
     torch_device = torch.device(device)
@@ -199,9 +211,17 @@ def materialize_dparameter(
             random._rng_tracker = random.init_vescale_rng_tracker()
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):
-            param = _C.materialize_tensor_with_local_shape(param, local_shape, torch_device)
+            # shortcut for parameters with no shard placements. TODO: what about Partial sharding
+            if not has_shard_placement:
+                param = _C.materialize_tensor(param)
+            else:
+                param = _C.materialize_tensor_with_local_shape(param, local_shape, torch_device)
     else:
-        param = _C.materialize_tensor_with_local_shape(param, local_shape, torch_device)
+        # shortcut for parameters with no shard placements. TODO: what about Partial sharding
+        if not has_shard_placement:
+            param = _C.materialize_tensor(param)
+        else:
+            param = _C.materialize_tensor_with_local_shape(param, local_shape, torch_device)
     # wrap parameter's data as dtensor
     dt = DTensor(
         local_tensor=param.data,

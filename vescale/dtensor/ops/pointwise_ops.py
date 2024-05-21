@@ -52,6 +52,7 @@ aten = torch.ops.aten
 
 linear_pointwise_ops = [
     aten.div.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
+    aten.div_.Scalar,
     aten.to.dtype,
     aten.add.Tensor,
     aten.add_.Tensor,
@@ -407,15 +408,30 @@ pointwise_ops = [
 
 
 def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False) -> StrategyType:
-    # (Hongyu): allow pointwise P mul/div R
-    if op_schema.op in [aten.mul.Tensor, aten.div.Tensor]:
-        placements_a = op_schema.args_schema[0].strategies[0].output_spec.placements
-        if isinstance(op_schema.args_schema[1], float):
+    # (Hongyu): allow pointwise P mul/div R and R mul P
+    # (Li): allow pointwise inplace P mul_/div_ R. It's crucial for inplace dropout.
+    partial_strategy_index = -1
+    if op_schema.op in [aten.mul.Tensor, aten.mul_.Tensor, aten.div.Tensor, aten.div_.Tensor]:
+        partial_a = (
+            op_schema.args_schema[0].strategies[0].output_spec.is_partial()
+            if isinstance(op_schema.args_schema[0], OpStrategy)
+            else False
+        )
+        partial_b = (
+            op_schema.args_schema[1].strategies[0].output_spec.is_partial()
+            if isinstance(op_schema.args_schema[1], OpStrategy)
+            else False
+        )
+        if partial_a and partial_b:
+            linearity = False
+        elif partial_b and op_schema.op in [aten.div.Tensor, aten.div_.Tensor]:
+            linearity = False
+        else:
             linearity = True
-        elif isinstance(op_schema.args_schema[1], OpStrategy):
-            spec_b = op_schema.args_schema[1].strategies[0].output_spec
-            if len(placements_a) == 1 and placements_a[0].is_partial() and spec_b.is_replicated():
-                linearity = True
+        if partial_a:
+            partial_strategy_index = 0
+        if partial_b:
+            partial_strategy_index = 1
 
     max_shards_strategy_index = -1
     max_shards = -1
@@ -429,6 +445,9 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = 
     elif _is_out_variant_op(op_schema.op):
         # out variant op should follow the out kwarg strategy
         followed_strategy = op_schema.kwargs_schema["out"]
+    elif partial_strategy_index != -1:
+        # follow partial strategy on element-wise mul/div cases
+        followed_strategy = op_schema.args_schema[partial_strategy_index]
     else:
         # normal pointwise op, we choose to follow the arg with
         # the max shards in case operands needs reshard
@@ -462,7 +481,7 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = 
                 # clear the partial placemnet if op does not support linearity
                 # by default we just replicate the partial, need to see if this
                 # is optimal for all cases
-                raise RuntimeError("Vescale not support Partial with no linearity op")
+                raise RuntimeError(f"Vescale not support Partial with no linearity op {op_schema.op}")
             else:
                 out_placements.append(placement)
 
@@ -488,6 +507,7 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = 
                 redistribute_cost=None,
             )
         )
+
     return pointwise_strategy
 
 

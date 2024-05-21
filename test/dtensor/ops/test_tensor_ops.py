@@ -16,8 +16,8 @@ from torch.testing._internal.common_utils import run_tests
 from unittest import skip
 
 from vescale import DeviceMesh, DTensor, distribute_tensor
-from vescale.dtensor._diff import EnablePartialMode
 from vescale.dtensor.placement_types import Partial, Replicate, Shard, InterleavedShard
+from vescale.dtensor import empty as dempty
 
 
 class DistTensorOpsTest(DTensorTestBase):
@@ -129,17 +129,6 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(replicate_out.to_local(), expected_dt.to_local())
 
     @with_comms
-    def test_empty_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
-
-        input_tensor = torch.randn(4, 8, requires_grad=True)
-        dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        empty_like_dt = torch.empty_like(dist_tensor)
-        # empty is not deterministic, so we only check that the shard propagation worked
-        self.assertEqual((4, 8), empty_like_dt.to_local().shape)
-
-    @with_comms
     def test_fill_inplace(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
@@ -151,49 +140,49 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(full_expected, full_like_dt.to_local())
         self.assertEqual(full_expected, dist_tensor.to_local())
 
+    def _run_xxx_like(self, xxx_like_op, *args, **kwargs):
+        all_mesh_shapes = [
+            torch.arange(self.world_size),
+            torch.arange(self.world_size).reshape(self.world_size // 2, 2),
+        ]
+        for mesh_shape in all_mesh_shapes:
+            mesh_dim = mesh_shape.dim()
+            device_mesh = DeviceMesh(self.device_type, mesh_shape)
+            all_shapes = [(8, 4), (4, 4, 4), (8, 8, 4, 4), (5, 6, 7, 8, 9)]
+            for global_shape in all_shapes:
+                all_placements = [Replicate(), Partial()] + [Shard(d) for d in range(len(global_shape))]
+                from itertools import product
+
+                all_placements = [list(placements) for placements in product(all_placements, repeat=mesh_dim)]
+
+                for placements in all_placements:
+                    sharded_dims = [placement.dim for placement in placements if placement.is_shard()]
+                    if len(sharded_dims) > len(set(sharded_dims)):
+                        # Skip the placements that shard along the same dim more than once
+                        continue
+                    expected_tensor = xxx_like_op(torch.empty(*global_shape, device="cuda"), *args, **kwargs)
+                    dist_expected = distribute_tensor(expected_tensor.detach().clone(), device_mesh, placements)
+                    dtensor = xxx_like_op(
+                        dempty(*global_shape, device_mesh=device_mesh, placements=placements), *args, **kwargs
+                    )
+                    self.assertEqual(dtensor._local_tensor.shape, dist_expected._local_tensor.shape, atol=0.0, rtol=0.0)
+                    if any(p.is_partial() for p in placements):
+                        self.assertTrue(all(not p.is_partial() for p in dtensor._spec.placements))
+                    else:
+                        self.assertTrue(list(dtensor._spec.placements) == placements)
+                        if xxx_like_op != torch.empty_like:
+                            self.assertEqual(dtensor._local_tensor, dist_expected._local_tensor, atol=0.0, rtol=0.0)
+                    full_tensor = dtensor.full_tensor()
+                    self.assertEqual(full_tensor.shape, expected_tensor.shape, atol=0.0, rtol=0.0)
+                    if xxx_like_op != torch.empty_like:
+                        self.assertEqual(full_tensor, expected_tensor, atol=0.0, rtol=0.0)
+
     @with_comms
-    def test_full_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
-
-        input_tensor = torch.randn(4, 8, requires_grad=True)
-        dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        full_like_dt = torch.full_like(dist_tensor, 42.0)
-        full_expected = torch.full((4, 8), 42.0)
-        self.assertEqual(full_expected, full_like_dt.to_local())
-
-    @with_comms
-    def test_ones_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
-
-        input_tensor = torch.randn(4, 8, requires_grad=True)
-        dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        ones_like_dt = torch.ones_like(dist_tensor)
-        ones_expected = torch.ones(4, 8)
-        self.assertEqual(ones_expected, ones_like_dt.to_local())
-
-    @with_comms
-    @skip("failed")
-    def test_ones_like_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Partial()]
-
-        input_tensor = torch.randn(4, 8, requires_grad=True)
-        dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
-
-        with EnablePartialMode():
-            ones_like_dt = torch.ones_like(dist_tensor)
-        ones_expected = torch.ones(dist_tensor.shape)
-        assert isinstance(ones_like_dt.placements[0], Partial)
-        ones_like_dt_replicate = torch.ones_like(dist_tensor)
-        assert isinstance(ones_like_dt_replicate.placements[0], Replicate)
-
-        self.assertEqual(
-            ones_expected,
-            ones_like_dt.to_local(),
-        )
+    def test_xxx_like(self):
+        self._run_xxx_like(torch.empty_like)
+        self._run_xxx_like(torch.ones_like)
+        self._run_xxx_like(torch.zeros_like)
+        self._run_xxx_like(torch.full_like, fill_value=42.0)
 
     @with_comms
     @skip("failed")
@@ -213,24 +202,6 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
     @with_comms
-    @skip("failed")
-    def test_zeros_like_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Partial()]
-
-        input_tensor = torch.randn(4, 8, requires_grad=True)
-        dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
-
-        with EnablePartialMode():
-            zeros_like_dt = torch.zeros_like(dist_tensor)
-        assert isinstance(zeros_like_dt.placements[0], Partial)
-        zeros_like_dt_replicate = torch.zeros_like(dist_tensor)
-        assert isinstance(zeros_like_dt_replicate.placements[0], Replicate)
-        zeros_expected = torch.zeros(dist_tensor.shape)
-        self.assertEqual(zeros_expected, zeros_like_dt.to_local())
-
-    @with_comms
     def test_zero_inplace(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
@@ -241,17 +212,6 @@ class DistTensorOpsTest(DTensorTestBase):
         zeros_expected = torch.zeros(4, 8)
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
         self.assertEqual(zeros_expected, dist_tensor.to_local())
-
-    @with_comms
-    def test_zeros_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [Shard(0)]
-
-        input_tensor = torch.randn(4, 8, requires_grad=True)
-        dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        zeros_like_dt = torch.zeros_like(dist_tensor)
-        zeros_expected = torch.zeros(4, 8)
-        self.assertEqual(zeros_expected, zeros_like_dt.to_local())
 
     @with_comms
     def test_equal(self):

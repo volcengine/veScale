@@ -39,19 +39,6 @@ class DFactoryTest(DTensorTestBase):
     def world_size(self):
         return 4
 
-    # def _seeding(self):
-    #     import os
-
-    #     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-    #     torch.use_deterministic_algorithms(True)
-    #     torch.manual_seed(0)
-    #     torch.random.manual_seed(0)
-    #     torch.cuda.manual_seed(0)
-    #     self._rng_state = torch.random.get_rng_state()
-
-    # def _reset_rng(self):
-    #     torch.random.set_rng_state(self._rng_state)
-
     def _match_factory_dfactory(self, factory, dfactory, global_shape, placements, device_mesh):
         aten_dfactory_pi = _factory._provide_args(device_mesh, {factory: PI.from_placements(placements)})
 
@@ -64,7 +51,7 @@ class DFactoryTest(DTensorTestBase):
             start, end, step = 0, global_shape[0], 1
             assert not placements[0].is_shard() or placements[0].is_shard(0)
 
-            with _factory.FactoryDispatchMode(device_mesh=device_mesh, aten_dfactory_pi=aten_dfactory_pi):
+            with _factory.FactoryDispatchModeOn(device_mesh, aten_dfactory_pi):
                 actual1 = torch.arange(end, dtype=dtype, layout=layout, requires_grad=requires_grad)
                 actual2 = torch.arange(start, end, dtype=dtype, layout=layout, requires_grad=requires_grad)
                 actual3 = torch.arange(start, end, step, dtype=dtype, layout=layout, requires_grad=requires_grad)
@@ -98,7 +85,7 @@ class DFactoryTest(DTensorTestBase):
             )
             goldens = (golden1, golden2, golden3)
         elif factory == torch.full:
-            with _factory.FactoryDispatchMode(device_mesh=device_mesh, aten_dfactory_pi=aten_dfactory_pi):
+            with _factory.FactoryDispatchModeOn(device_mesh, aten_dfactory_pi):
                 actual = torch.full(global_shape, fill_value, dtype=dtype, layout=layout, requires_grad=requires_grad)
             golden = dfactory(
                 global_shape,
@@ -111,12 +98,12 @@ class DFactoryTest(DTensorTestBase):
             )
             actuals = (actual,)
             goldens = (golden,)
-        elif factory in [torch.zeros, torch.ones, torch.empty, torch.randn]:
-            if factory == torch.randn:
+        elif factory in [torch.zeros, torch.ones, torch.empty, torch.randn, torch.rand]:
+            if factory in [torch.randn, torch.rand]:
                 manual_seed(0, device_mesh)
-            with _factory.FactoryDispatchMode(device_mesh=device_mesh, aten_dfactory_pi=aten_dfactory_pi):
+            with _factory.FactoryDispatchModeOn(device_mesh, aten_dfactory_pi):
                 actual = factory(global_shape, dtype=dtype, layout=layout, requires_grad=requires_grad)
-            if factory == torch.randn:
+            if factory in [torch.randn, torch.rand]:
                 manual_seed(0, device_mesh)
             golden = dfactory(
                 global_shape,
@@ -155,14 +142,125 @@ class DFactoryTest(DTensorTestBase):
             torch.empty: dtensor.empty,
             torch.full: dtensor.full,
             torch.randn: dtensor.randn,
+            torch.rand: dtensor.rand,
             torch.arange: dtensor.arange,
         }
 
-        # self._seeding()
         for factory, dfactory in factory_dfactory.items():
             for global_shape in [(4, 4), (5, 4), (5, 7, 9)]:
                 for placements in ([Replicate()], [Shard(0)]):
                     self._match_factory_dfactory(factory, dfactory, global_shape, placements, device_mesh)
+
+    @with_comms
+    def test_nested_dfactory(self):
+        device_mesh = DeviceMesh(self.device_type, range(self.world_size))
+
+        replicate_adp = _factory._provide_args(device_mesh, {torch.empty: PI.from_placements([Replicate()])})
+        shard_adp = _factory._provide_args(device_mesh, {torch.empty: PI.from_placements([Shard(0)])})
+
+        # Off, Off
+        with _factory.FactoryDispatchModeOff():
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOff():
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+        # Off, On
+        with _factory.FactoryDispatchModeOff():
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+        # Off, multiple On
+        with _factory.FactoryDispatchModeOff():
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+        # On, Off
+        with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOff():
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+
+        # On, multiple Off
+        with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOff():
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOff():
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+
+        # Off, On, Off
+        with _factory.FactoryDispatchModeOff():
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+                with _factory.FactoryDispatchModeOff():
+                    self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+        # On, Off, On
+        with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+            actual = torch.empty(self.world_size)
+            self.assertTrue(actual.placements[0].is_replicate())
+
+            with _factory.FactoryDispatchModeOff():
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+                with _factory.FactoryDispatchModeOn(device_mesh, shard_adp):
+                    actual = torch.empty(self.world_size)
+                    self.assertTrue(actual.placements[0].is_shard(0))
+
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+            actual = torch.empty(self.world_size)
+            self.assertTrue(actual.placements[0].is_replicate())
+
+        ### With Unrelated ###
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class UnrelatedDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs if kwargs is not None else {})
+
+        # Off, Unrelated, Off
+        with _factory.FactoryDispatchModeOff():
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with UnrelatedDispatchMode():  # Expect On
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+                with _factory.FactoryDispatchModeOff():
+                    self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+
+        # On, Unrelated, Off
+        with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            with UnrelatedDispatchMode():
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+                with _factory.FactoryDispatchModeOff():
+                    self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+                self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+
+        # Off, Unrelated, On
+        with _factory.FactoryDispatchModeOff():
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            with UnrelatedDispatchMode():
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+                with _factory.FactoryDispatchModeOn(device_mesh, replicate_adp):
+                    self.assertTrue(isinstance(torch.empty(self.world_size), DTensor))
+                self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
+            self.assertTrue(not isinstance(torch.empty(self.world_size), DTensor))
 
     @with_comms
     def test_api(self):
@@ -314,6 +412,111 @@ class DFactoryTest(DTensorTestBase):
         self.assertTrue(dtensor.equal(out, ones_replicate))
 
     @with_comms
+    def test_api_nested(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        data = torch.ones(HIDDEN_SIZE, device=self.device_type)
+
+        class Inner1(nn.Module):
+            def forward(self, x):
+                return torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+
+        class Outer1(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = Inner1()
+
+            def forward(self, x):
+                a = torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+                b = self.m(x)
+                c = torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+                return a, b, c
+
+        class Inner2(nn.Module):
+            def forward(self, x):
+                return torch.ones(x.shape, dtype=x.dtype, device=x.device)
+
+        class Outer2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = Inner1()
+                self.m2 = Inner2()
+
+            def forward(self, x):
+                a = torch.ones(x.shape, dtype=x.dtype, device=x.device)
+                b = self.m1(x)
+                c = torch.ones(x.shape, dtype=x.dtype, device=x.device)
+                d = self.m2(x)
+                e = torch.ones(x.shape, dtype=x.dtype, device=x.device)
+                return a, b, c, d, e
+
+        class Root(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm = Outer1()
+
+            def forward(self, x):
+                a = torch.empty(x.shape, dtype=x.dtype, device=x.device)
+                b, c, d = self.mm(x)
+                e = torch.empty(x.shape, dtype=x.dtype, device=x.device)
+                return a, b, c, d, e
+
+        # Off, Off
+        model = parallelize_module(Outer1(), device_mesh, {}, factory={Outer1: False, Inner1: False})
+        out = model(data)
+        for o in out:
+            self.assertTrue(not isinstance(o, DTensor))
+
+        # Off, On
+        model = parallelize_module(Outer1(), device_mesh, {}, factory={Outer1: False, Inner1: True})
+        a, b, c = model(data)
+        self.assertTrue(not isinstance(a, DTensor))
+        self.assertTrue(isinstance(b, DTensor))
+        self.assertTrue(not isinstance(c, DTensor))
+
+        # Off, multiple On
+        model = parallelize_module(Outer2(), device_mesh, {}, factory={Outer2: False, Inner1: True, Inner2: True})
+        a, b, c, d, e = model(data)
+        self.assertTrue(not isinstance(a, DTensor))
+        self.assertTrue(isinstance(b, DTensor))
+        self.assertTrue(not isinstance(c, DTensor))
+        self.assertTrue(isinstance(d, DTensor))
+        self.assertTrue(not isinstance(e, DTensor))
+
+        # On, Off
+        model = parallelize_module(Outer1(), device_mesh, {}, factory={Outer1: True, Inner1: False})
+        a, b, c = model(data)
+        self.assertTrue(isinstance(a, DTensor))
+        self.assertTrue(not isinstance(b, DTensor))
+        self.assertTrue(isinstance(c, DTensor))
+
+        # On, multiple Off
+        model = parallelize_module(Outer2(), device_mesh, {}, factory={Outer2: True, Inner1: False, Inner2: False})
+        a, b, c, d, e = model(data)
+        self.assertTrue(isinstance(a, DTensor))
+        self.assertTrue(not isinstance(b, DTensor))
+        self.assertTrue(isinstance(c, DTensor))
+        self.assertTrue(not isinstance(d, DTensor))
+        self.assertTrue(isinstance(e, DTensor))
+
+        # Off, On, Off
+        model = parallelize_module(Root(), device_mesh, {}, factory={Root: False, Outer1: True, Inner1: False})
+        a, b, c, d, e = model(data)
+        self.assertTrue(not isinstance(a, DTensor))
+        self.assertTrue(isinstance(b, DTensor))
+        self.assertTrue(not isinstance(c, DTensor))
+        self.assertTrue(isinstance(d, DTensor))
+        self.assertTrue(not isinstance(e, DTensor))
+
+        # On, Off, On
+        model = parallelize_module(Root(), device_mesh, {}, factory={Root: True, Outer1: False, Inner1: True})
+        a, b, c, d, e = model(data)
+        self.assertTrue(isinstance(a, DTensor))
+        self.assertTrue(not isinstance(b, DTensor))
+        self.assertTrue(isinstance(c, DTensor))
+        self.assertTrue(not isinstance(d, DTensor))
+        self.assertTrue(isinstance(e, DTensor))
+
+    @with_comms
     def test_with_fwd_hook(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         data = torch.ones(HIDDEN_SIZE, device=self.device_type)
@@ -338,6 +541,45 @@ class DFactoryTest(DTensorTestBase):
                 self.assertTrue(out1.placements[0].is_shard(0))
                 self.assertTrue(isinstance(out2, DTensor))
                 self.assertTrue(dtensor.equal(out2, zero_replicate))
+
+        # submoduled simple case
+        class OuterSimpleArgs1(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = SimpleArgs1()
+
+            def forward(self, x):
+                a = torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+                b, c = self.m(x)
+                d = torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+                return a, b, c, d
+
+        class OuterDefaultArgs1(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = DefaultArgs1()
+
+            def forward(self, x):
+                a = torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+                b, c = self.m(x)
+                d = torch.zeros(x.shape, dtype=x.dtype, device=x.device)
+                return a, b, c, d
+
+        for mcls in [OuterSimpleArgs1, OuterDefaultArgs1]:
+            for fwd_plan in [{"m.input": [[Shard(0)]]}, {"m.input": {"a": [Shard(0)]}}]:
+                # factory = True
+                dm = parallelize_module(mcls(), device_mesh, {"forward": fwd_plan}, factory={mcls: True})
+                _, out1, out2, _ = dm(data)
+                self.assertTrue(isinstance(out1, DTensor))
+                self.assertTrue(out1.placements[0].is_shard(0))
+                self.assertTrue(isinstance(out2, DTensor))
+                self.assertTrue(dtensor.equal(out2, zero_replicate))
+                # factory = False
+                dm = parallelize_module(mcls(), device_mesh, {"forward": fwd_plan}, factory={mcls: False})
+                _, out1, out2, _ = dm(data)
+                self.assertTrue(isinstance(out1, DTensor))
+                self.assertTrue(out1.placements[0].is_shard(0))
+                self.assertTrue(not isinstance(out2, DTensor))
 
         # complex case
         class MixedArgs2(nn.Module):
@@ -387,7 +629,7 @@ class DFactoryTest(DTensorTestBase):
             self.assertTrue(dtensor.equal(out[-1], zero_replicate))
 
     @with_comms
-    def test_with_model_patch(self):  # TODO: support nested factory False
+    def test_with_model_patch(self):
         class MLP(nn.Module):
             def __init__(self):
                 super().__init__()

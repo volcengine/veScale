@@ -47,7 +47,7 @@ class TestDeferInitDTensor(DTensorTestBase):
         dist_golden = distribute_tensor(tensor_golden, mesh, sharding)
 
         manual_seed(0, mesh)
-        tensor_defer = deferred_init(op_call, global_shape)
+        tensor_defer = deferred_init(op_call, global_shape, device=self.device_type)
         dtensor_defer = materialize_dtensor(tensor_defer, mesh, sharding)
 
         self.assertTrue(

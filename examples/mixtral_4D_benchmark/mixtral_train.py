@@ -84,6 +84,7 @@ def run_mixtral(args):
         accumulate_allreduce_grads_in_fp32=True,
         overlap_grad_reduce=False,
         use_distributed_optimizer=True,
+        whitelist_module_types=[MixtralSparseMoeBlock],
     )
 
     doptim = DistributedOptimizer(

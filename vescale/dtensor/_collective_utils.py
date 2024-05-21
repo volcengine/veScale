@@ -9,8 +9,9 @@
 ################################################################################
 
 import logging
-from typing import List, Optional
 import math
+import copy
+from typing import List, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -153,6 +154,78 @@ def mesh_all_to_all(
             async_op=async_op,
         )
     return work
+
+
+def mesh_all_to_all_single(
+    tensor: torch.Tensor,
+    mesh: DeviceMesh,
+    original_shard_dim: int,
+    target_shard_dim: int,
+    mesh_dim: int = 0,
+    async_op: bool = False,
+):
+    """
+    transpose the sharded tensor along a device mesh dimension.
+
+    Args:
+        tensor (torch.Tensor): tensor to all-to-all.
+        mesh (DeviceMesh): device mesh that communication happens.
+        original_shard_dim (int): the dim that source tensor is sharded
+        target_shard_dim (int): the dim that transposed tensor is sharded
+        mesh_dim (int, optional): indicate which mesh dimension we want
+            to broadcast on, we by default choose the first rank on the
+            mesh dimension as source of truth.
+        async_op (bool, default False): unused arguments. As all-to-all will
+            always be sync.
+
+    Returns:
+        A :class:`Tensor` object
+    """
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(
+            mesh_all_to_all_single, tensor, mesh, original_shard_dim, target_shard_dim, mesh_dim
+        )
+
+    # if rank is not part of mesh, simply return tensor, which should be an empty tensor
+    if mesh.get_coordinate() is None:
+        return tensor
+    mesh_size = mesh.size(mesh_dim)
+    assert tensor.size(target_shard_dim) % mesh_size == 0, "we don't support unvevn shard on ``target_shard_dim``"
+    input_rank = tensor.ndim
+    assert input_rank >= 2, "input must has at least 2 ranks"
+
+    target_shape = copy.deepcopy(list(tensor.shape))
+    target_shape[original_shard_dim] *= mesh_size
+    target_shape[target_shard_dim] //= mesh_size
+
+    dim_group = mesh.get_dim_groups(mesh_dim)
+    assert isinstance(dim_group, ProcessGroup)
+
+    if target_shard_dim != 0:
+        k_new_shape = list(tensor.shape)
+        k_new_shape[target_shard_dim] //= mesh_size
+        k_new_shape[0] *= mesh_size
+        new_shape = list(tensor.shape)
+        new_shape[target_shard_dim] //= mesh_size
+        new_shape.insert(target_shard_dim, mesh_size)
+        indices = (
+            [target_shard_dim] + list(range(0, target_shard_dim)) + list(range(target_shard_dim + 1, tensor.ndim + 1))
+        )
+        tensor = tensor.reshape(new_shape).permute(indices).reshape(k_new_shape)
+
+    output = funcol.all_to_all_single(tensor, output_split_sizes=None, input_split_sizes=None, group=dim_group)
+    if original_shard_dim == 0:
+        return output
+
+    n, *out_shape = list(output.shape)
+
+    indices = (
+        list(range(1, original_shard_dim))
+        + [original_shard_dim, 0]
+        + list(range(original_shard_dim + 1, output.ndim + 1))
+    )
+
+    return output.reshape(mesh_size, n // mesh_size, *out_shape).permute(indices).reshape(target_shape)
 
 
 def mesh_broadcast(

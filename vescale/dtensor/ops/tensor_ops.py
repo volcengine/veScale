@@ -12,8 +12,8 @@ from typing import List, Optional, Sequence, Tuple, cast
 import warnings
 
 import copy
+import numpy as np
 import torch
-from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 from vescale.dtensor._utils import compute_local_shape
 from vescale.dtensor.op_schema import (
@@ -23,11 +23,12 @@ from vescale.dtensor.op_schema import (
     PlacementStrategy,
     StrategyType,
     OpStrategy,
+    TupleStrategy,
 )
-from vescale.dtensor._diff import EnablePartialMode
 from vescale.dtensor.ops.common_rules import pointwise_rule
 from vescale.dtensor.ops.utils import (
     is_tensor_dim_sharded,
+    is_tensor_dim_interleaved_sharded,
     is_tensor_partial,
     normalize_dim,
     prod,
@@ -117,18 +118,17 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             # if the arg_spec have partial, accept partial
             # in the input_specs but output replicate for
             # those corresponding mesh dims
-            enable_partial = False
-            mode = _get_current_dispatch_mode()
-            if isinstance(mode, EnablePartialMode):
-                enable_partial = True
 
             output_spec = DTensorSpec(
                 mesh=arg_spec.mesh,
-                placements=tuple(
-                    Replicate() if (isinstance(p, Partial) and not enable_partial) else p for p in arg_spec.placements
-                ),
+                placements=tuple(Replicate() if isinstance(p, Partial) else p for p in arg_spec.placements),
             )
-            create_like_strategy.strategies.append(PlacementStrategy(output_spec=output_spec, input_specs=(arg_spec,)))
+            create_like_strategy.strategies.append(
+                PlacementStrategy(
+                    output_spec=output_spec,
+                    input_specs=(arg_spec,),
+                )
+            )
 
         else:
             create_like_strategy.strategies.append(PlacementStrategy(arg_spec))
@@ -136,27 +136,96 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     return create_like_strategy
 
 
-@register_op_strategy(
+@register_prop_rule(
     [
         aten.new_empty.default,
         aten.new_full.default,
         aten.new_ones.default,
-        aten.new_zeros.default,
+        # aten.new_zeros.default,
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
-def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
+def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
-    replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
-    return OpStrategy([PlacementStrategy(replica_spec)])
+    args = op_schema.args_schema
+    input_spec = args[0]
+    assert isinstance(input_spec, DTensorSpec)
+    mesh = input_spec.mesh
+    output_shape = args[1]
+
+    # has partial spec
+    if any(p.is_partial() for p in input_spec.placements):
+        raise RuntimeError("constrcuting partial tensors using new-factory methods is ambigious")
+
+    # no shard spec
+    if all(not p.is_shard() for p in input_spec.placements):
+        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        return OutputSharding(replica_spec)
+    # has shard spec, we refer to view op to do the sharding prop.
+    assert (
+        input_spec.tensor_meta is not None
+    ), "tensor meta must not be None if you are constructing a sharded tensor using `new_zeros` or something like that"
+    original_numel = prod(input_spec.tensor_meta.shape)
+    target_numel = prod(output_shape)
+    assert original_numel == target_numel, "for now, we only support the same numel in new_factory methods"
+
+    from vescale.dtensor.ops.vescale_view_ops import vescale_view_rule_prop, ops
+
+    spec = ops[torch.Tensor.view]
+    output_sharding = vescale_view_rule_prop(op_schema=op_schema, spec=spec)
+    return output_sharding
+
+
+# (Hongyu): support partial new_zeros
+@register_prop_rule(
+    aten.new_zeros.default,
+    schema_info=RuntimeSchemaInfo(1, ["dtype"]),
+)
+def new_zeros_rule(op_schema: OpSchema) -> OutputSharding:
+    args = op_schema.args_schema
+    input_spec, output_shape = args[0], args[1]
+    assert isinstance(input_spec, DTensorSpec)
+    mesh = input_spec.mesh
+    output_stride = list(np.cumprod(output_shape[::-1])[:-1][::-1])
+    output_stride.append(1)
+
+    if input_spec.is_partial():
+        partial_spec = DTensorSpec(
+            mesh=mesh,
+            placements=input_spec.placements,
+            tensor_meta=TensorMeta(
+                torch.Size(output_shape),
+                tuple(output_stride),
+                input_spec.tensor_meta.dtype,
+            ),
+        )
+        return OutputSharding(partial_spec)
+
+    # no shard spec
+    if all(not p.is_shard() for p in input_spec.placements):
+        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        return OutputSharding(replica_spec)
+    # has shard spec, we refer to view op to do the sharding prop.
+    assert (
+        input_spec.tensor_meta is not None
+    ), "tensor meta must not be None if you are constructing a sharded tensor using `new_zeros` or something like that"
+    original_numel = prod(input_spec.tensor_meta.shape)
+    target_numel = prod(output_shape)
+    assert original_numel == target_numel, "for now, we only support the same numel in new_factory methods"
+
+    from vescale.dtensor.ops.vescale_view_ops import vescale_view_rule_prop, ops
+
+    spec = ops[torch.Tensor.view]
+    output_sharding = vescale_view_rule_prop(op_schema=op_schema, spec=spec)
+    return output_sharding
 
 
 @register_prop_rule(
     aten.new_empty_strided.default,
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
-def new_empty_strided_rule(op_schema: OpSchema) -> StrategyType:
+def new_empty_strided_rule(op_schema: OpSchema) -> OutputSharding:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
     args = op_schema.args_schema
@@ -263,16 +332,17 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
     return bucketize_strategy
 
 
-@register_op_strategy(aten.slice.Tensor, schema_info=RuntimeSchemaInfo(1))
-def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+# NOTE: we change to use rule-based way because we want to change non tensor args
+@register_prop_rule(aten.slice.Tensor, schema_info=RuntimeSchemaInfo(1))
+def prop_slice(op_schema: OpSchema) -> OutputSharding:
     """
     forwards all shardings except the slice dimension.
     """
     defaults = (None, 0, None, None, 1)
-    input_strategy, dim, start, end, step = op_schema.args_schema + defaults[len(op_schema.args_schema) :]
-    assert isinstance(input_strategy, OpStrategy)
-    input_shape = input_strategy.output_shape
-    input_ndim = input_strategy.output_ndim
+    input_spec, dim, start, end, step = op_schema.args_schema + defaults[len(op_schema.args_schema) :]
+    assert isinstance(input_spec, DTensorSpec)
+    input_shape = input_spec.tensor_meta.shape
+    input_ndim = len(input_shape)
     assert isinstance(dim, int)
     if start is None:
         start = 0
@@ -281,6 +351,8 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(start, int)
     assert isinstance(end, int)
     assert isinstance(step, int)
+
+    mesh = input_spec.mesh
 
     # normalize args
     slice_dim = normalize_dim(dim, input_ndim)
@@ -291,32 +363,56 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # calculate slice tensor meta
     output_shape_list = list(input_shape)
     output_shape_list[dim] = end - start
-    out_tensor_meta = TensorMeta(
-        shape=torch.Size(output_shape_list),
-        stride=input_strategy.output_stride,
-        dtype=input_strategy.output_dtype,
-    )
 
-    slice_strategy = OpStrategy([])
+    if not is_tensor_dim_sharded(input_spec, dim=slice_dim) or redundant_slice:
+        # only add the strategy if the slice dim is not sharded
+        out_spec = DTensorSpec(mesh, input_spec.placements)
+        return OutputSharding(output_spec=out_spec)
+    if is_tensor_dim_interleaved_sharded(input_spec, dim=slice_dim):
+        interleaved_size = None
+        interleaved_shard_mesh_dim = None
+        for i, p in enumerate(input_spec.placements):
+            if p.is_interleaved_shard(dim=slice_dim):
+                if interleaved_size is None:
+                    interleaved_size = p.interleaved_size
+                    interleaved_shard_mesh_dim = i
+                else:
+                    raise NotImplementedError(
+                        "for now, we don't support slice tensor along dim which is interleaved sharded two or more times"
+                    )
+        interleaved_unit_size = input_spec.tensor_meta.shape[slice_dim] // interleaved_size
+        if step != 1:
+            raise NotImplementedError("for now, we only support constant 1 step in slice op")
 
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
-        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
-            # only add the strategy if the slice dim is not sharded
-            out_spec = DTensorSpec(mesh, arg_spec.placements, out_tensor_meta)
-            slice_strategy.strategies.append(PlacementStrategy(output_spec=out_spec))
-    if not slice_strategy.strategies:
-        # if all strategies are filtered out, unsharding all specs on slice dim
-        # of the input strategy, and use that as the op strategy
-        for arg_strategy in input_strategy.strategies:
-            arg_spec = arg_strategy.output_spec
-            unshard_spec = DTensorSpec(
-                mesh,
-                unshard_tensor_dim(arg_spec.placements, dim=slice_dim),
-                out_tensor_meta,
+        slice_size = end - start
+        if slice_size % interleaved_unit_size != 0 or start % interleaved_unit_size != 0:
+            raise NotImplementedError(
+                "for now, we only support slice boundary strictly aligning with the sharding spec"
             )
-            slice_strategy.strategies.append(PlacementStrategy(output_spec=unshard_spec))
-    return slice_strategy
+        new_placements = list(copy.deepcopy(input_spec.placements))
+        new_interleaved_size = slice_size // interleaved_unit_size
+        if new_interleaved_size == 1:
+            new_placements[interleaved_shard_mesh_dim] = Shard(slice_dim)
+        else:
+            new_placements[interleaved_shard_mesh_dim] = InterleavedShard(slice_dim, new_interleaved_size)
+        out_spec = DTensorSpec(mesh, new_placements)
+        return OutputSharding(
+            output_spec=out_spec,
+            schema_suggestions=[
+                OpSchema(
+                    op_schema.op,
+                    args_schema=(
+                        input_spec,
+                        dim,
+                        start // mesh.size(interleaved_shard_mesh_dim),
+                        end // mesh.size(interleaved_shard_mesh_dim),
+                        step,
+                    ),
+                    kwargs_schema=op_schema.kwargs_schema,
+                )
+            ],
+            needs_redistribute=True,
+        )
 
 
 @register_op_strategy([aten._local_scalar_dense.default])
@@ -391,14 +487,15 @@ def scatter_value(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     )
 
 
-@register_op_strategy([aten.index_put_.default, aten.index_put.default])
-def index_put(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """Set the Output with the index sharding"""
-    value = op_schema.args_schema[2]
-
-    value_spec: DTensorSpec = value.strategies[0].output_spec
-    output_spec = DTensorSpec(mesh, tuple(value_spec.placements))
-    return OpStrategy([PlacementStrategy(output_spec)])
+# (Hongyu): allow partial index_put here
+@register_prop_rule([aten.index_put_.default, aten.index_put.default])
+def index_put_rule(op_schema: OpSchema) -> OutputSharding:
+    src_spec: DTensorSpec = op_schema.args_schema[0]
+    value_spec: DTensorSpec = op_schema.args_schema[2]
+    assert (
+        src_spec.placements == value_spec.placements
+    ), "Currently we only allow equal placements for src and value in index_put op"
+    return OutputSharding(src_spec)
 
 
 @register_op_strategy([aten.constant_pad_nd.default])
@@ -602,7 +699,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         return result
 
 
-@register_prop_rule([aten.cat.default, aten.stack.default], schema_info=RuntimeSchemaInfo(1, needs_pytree=True))
+@register_prop_rule([aten.cat.default], schema_info=RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
     # torch.cat requires all tensors must either have the same shape (except
     # in the concatenating dimension) or be "empty". "Empty" here strictly means
@@ -764,6 +861,102 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
                     placements=non_empty_specs[0].placements,
                 ),
             )
+
+
+def _derive_follow_placements_from_tuple_strategy(
+    tuple_strategy: TupleStrategy,
+) -> Sequence[Placement]:
+    """
+    derive the placements to follow from the tuple strategy, mainly used by
+    aten.stack, aten.cat, where each operand have the same shape, and correspondingly
+    expecting the same sharding
+    """
+
+    def merge_placement(cur_placement: Placement, new_placement: Placement) -> Placement:
+        # semantic if we already have a follow placement, we
+        # check each placement for the current arg placement
+        # to see if we want to merge/adjust the placement to follow
+        # the priority: Partial -> Shard -> Replicate
+        if cur_placement == new_placement:
+            return cur_placement
+
+        if cur_placement.is_partial():
+            if new_placement.is_shard():
+                # follow new placement
+                return new_placement
+            elif new_placement.is_partial():
+                # different partial types, we can't merge and have to replicate all here
+                return Replicate()
+            else:
+                # follow partial
+                return cur_placement
+        elif cur_placement.is_shard():
+            if new_placement.is_shard():
+                # cur/new placement are different sharding (i.e. different shard dim)
+                # currently fallback to replicate all args
+                return Replicate()
+            else:
+                # for partial/replicate, follow the current shard placement
+                return cur_placement
+        else:
+            # current replicate, just follow new placement
+            return new_placement
+
+    follow_placements: Optional[List[Placement]] = None
+    for arg_strategy in tuple_strategy.childs:
+        assert isinstance(arg_strategy, OpStrategy)
+        for placement_strategy in arg_strategy.strategies:
+            arg_placements = placement_strategy.output_spec.placements
+            if follow_placements is None:
+                follow_placements = list(arg_placements)
+                continue
+            mesh_ndim = len(follow_placements)
+            assert follow_placements is not None
+            for mesh_idx in range(mesh_ndim):
+                # merge placements with the priority
+                follow_placements[mesh_idx] = merge_placement(follow_placements[mesh_idx], arg_placements[mesh_idx])
+    assert follow_placements is not None, "follow placements should not be None!"
+    return follow_placements
+
+
+def normalize_shard_for_stack(placements: Sequence[Placement], insert_dim: int = 0) -> Sequence[Placement]:
+    # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
+    # be normalized with the new Shard placement
+    normalized_placements: List[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim >= insert_dim:
+            normalized_placements.append(Shard(placement.dim + 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements
+
+
+@register_op_strategy(aten.stack.default, RuntimeSchemaInfo(1, needs_pytree=True))
+def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = args_schema[0]
+    assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
+    first_input_strategy = input_tuple_strategy.childs[0]
+    assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
+    common_input_ndim = first_input_strategy.output_ndim
+    dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    # normalize the dim to be within the common input ndim
+    dim = normalize_dim(dim, common_input_ndim)
+
+    follow_placements = _derive_follow_placements_from_tuple_strategy(input_tuple_strategy)
+    follow_placements = normalize_shard_for_stack(follow_placements, dim)
+
+    # create op strategy base on the follow placements
+    op_strategy = OpStrategy([])
+
+    input_specs = tuple(DTensorSpec(mesh, tuple(follow_placements)) for _ in range(len(input_tuple_strategy.childs)))
+    op_strategy.strategies.append(
+        PlacementStrategy(
+            output_spec=DTensorSpec(mesh, tuple(follow_placements)),
+            input_specs=input_specs,
+        )
+    )
+    return op_strategy
 
 
 @register_prop_rule([aten.split.Tensor, aten.split_with_sizes.default], schema_info=RuntimeSchemaInfo(1))

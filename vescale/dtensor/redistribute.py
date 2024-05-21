@@ -12,7 +12,6 @@ from typing import Dict, List, Tuple, cast
 
 import torch
 import torch.distributed.distributed_c10d as c10d
-from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 import vescale.dtensor.dtensor as dtensor
 from vescale.dtensor._collective_utils import (
@@ -21,9 +20,9 @@ from vescale.dtensor._collective_utils import (
     mesh_broadcast,
     mesh_reduce_scatter,
     mesh_scatter,
+    mesh_all_to_all_single,
     wait,
 )
-from vescale.dtensor._diff import EnablePartialMode, switch_partial_mode
 from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.op_schema import DTensorSpec
 from vescale.dtensor.placement_types import InterleavedShard, Partial, Placement, Replicate, Shard
@@ -45,6 +44,8 @@ def _replicate_then_shard(val: _PlacementItem) -> int:
         return 0
 
 
+# NOTE: we don't need _decompose_reshard anymore, but we still keep this function
+# in case of future usage.
 def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
     """
     Decompose Si -> Sj into Si -> R -> Sj
@@ -216,7 +217,6 @@ def _reduce_scatter_to_shard_with_pad(
     return output
 
 
-@switch_partial_mode
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
@@ -244,7 +244,6 @@ def redistribute_local_tensor(
     current_placements = current_spec.placements
     target_placements = target_spec.placements
     sorted_placements = list(enumerate(zip(current_placements, target_placements)))
-    sorted_placements = _decompose_reshard(sorted_placements)
     sorted_placements.sort(key=_replicate_then_shard)
 
     for i, (current, target) in sorted_placements:
@@ -350,23 +349,41 @@ def redistribute_local_tensor(
             elif current.is_interleaved_shard():
                 raise NotImplementedError("Redistribution from InterleavedShard to Shard is not suported")
             else:
-                # NOTE: this case shouldn't hit _decompose_sharding, decompose sharding should
-                # decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
                 assert current.is_shard(), f"Current placement should be shard but found {current}"
                 shard_spec = cast(Shard, current)
-                if shard_spec.dim != target_placement.dim:
-                    # TODO: enable this with all_to_all
-                    raise NotImplementedError("Changing sharding dim is not supported yet!")
+                if shard_spec.dim == target_placement.dim:
+                    new_local_tensor = local_tensor
+                    continue
+                if (
+                    local_tensor.size(target_placement.dim) % device_mesh.size(dim=i) != 0
+                    or current_spec.shape[shard_spec.dim] % device_mesh.size(dim=i) != 0
+                ):
+                    # detect uneven shard on the target dim, fall back to decomposition impl.
+                    # e.g., decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
+                    new_local_tensor = _reshard_to_replicate_with_pad_one_dim(
+                        local_tensor, current_spec.shape, device_mesh, i, shard_spec.dim
+                    )
+                    shards, _ = target_placement._split_tensor(
+                        new_local_tensor,
+                        num_chunks=device_mesh.size(dim=i),
+                        with_padding=False,
+                        contiguous=False,
+                    )
+                    new_local_tensor = shards[my_coordinate[i]].clone()
+                    continue
+                new_local_tensor = mesh_all_to_all_single(
+                    local_tensor,
+                    mesh=device_mesh,
+                    original_shard_dim=shard_spec.dim,
+                    target_shard_dim=target_placement.dim,
+                    mesh_dim=i,
+                    async_op=False,  # all-to-all is sync
+                )
         elif target.is_partial():
             if current.is_partial():
-                mode = _get_current_dispatch_mode()
-                if isinstance(mode, EnablePartialMode):
-                    # P -> P
-                    new_local_tensor = local_tensor
-                else:
-                    # P -> R
-                    partial_spec = cast(Partial, current)
-                    new_local_tensor = mesh_all_reduce(local_tensor, device_mesh, partial_spec.reduce_op, i)
+                # P -> R
+                partial_spec = cast(Partial, current)
+                new_local_tensor = mesh_all_reduce(local_tensor, device_mesh, partial_spec.reduce_op, i)
             elif current.is_replicate():
                 # For replicate -> partial, we zero out all other ranks of the current mesh dim
                 # and leave only 1 rank have the data, to perform a "zero cost" reshard.

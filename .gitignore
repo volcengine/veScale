@@ -21,6 +21,8 @@
 /**/*.tar.gz
 /**/*.json.gz
 /**/*.log
+/**/.DS_Store
+*_checkpoint_dir
 
 # pre-commit config
 ./.pre-commit-config.yaml

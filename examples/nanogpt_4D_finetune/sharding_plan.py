@@ -34,6 +34,23 @@ fwd_plan = {
     "lm_head.output": [[Replicate()]],
 }
 
+fwd_plan_dist_dropout = {
+    "transformer.wte.input": [[Replicate()]],
+    "transformer.wte.output": [[Replicate()]],
+    "transformer.wpe.input": [[Replicate()]],
+    "transformer.wpe.output": [[Replicate()]],
+    r"transformer.h.\d+.input": [[Shard(1)]],
+    r"transformer.h.\d+.attn.input": [[Replicate()]],
+    r"transformer.h.\d+.attn.c_proj.output": [[Shard(1)]],
+    r"transformer.h.\d+.attn.output": [[Shard(1)]],
+    r"transformer.h.\d+.mlp.c_fc.input": [[Replicate()]],
+    r"transformer.h.\d+.mlp.c_proj.output": [[Shard(1)]],
+    r"transformer.h.\d+.mlp.output": [[Shard(1)]],
+    "transformer.ln_f.input": [[Shard(1)]],
+    "lm_head.input": [[Shard(2)]],
+    "lm_head.output": [[Replicate()]],
+}
+
 params_plan = {
     "transformer.wte.weight": [Shard(1)],
     "transformer.wpe.weight": [Shard(1)],
@@ -53,3 +70,5 @@ params_plan = {
 }
 
 nanoGPT_plan = {"parameter": params_plan, "forward": fwd_plan}
+
+nanoGPT_plan_dist_dropout = {"parameter": params_plan, "forward": fwd_plan_dist_dropout}
