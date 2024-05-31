@@ -54,6 +54,8 @@ class OpenLLaMa2Test1(DTensorTestBase):
 
         ckpt_state = {"model": ddp_decoder, "optimizer": ve_optimizer}
         vescale.checkpoint.save(TMP_CKPT_DIR, ckpt_state)
+        # Clean up writing futures (For unit test only)
+        vescale.checkpoint.VeScaleCheckpointer._VeScaleCheckpointer__cleanup()
 
         # Dump model state_dict
         dumped_model_sd = {}

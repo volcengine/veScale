@@ -58,6 +58,7 @@ linear_pointwise_ops = [
     aten.add_.Tensor,
     aten.neg.default,
     aten.neg_.default,
+    aten.floor_divide_.Tensor,
 ]
 
 pointwise_ops = [
@@ -614,3 +615,12 @@ for op in for_each_ops:
 
 for op in for_each_linearity_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(foreach_list_linear_strategy)
+
+
+from vescale.dtensor.ops.utils import register_prop_rule
+from vescale.dtensor.op_schema import OutputSharding
+
+
+@register_prop_rule([aten.clamp_max.default, aten.clamp_min.default])
+def clamp_max_rule(op_schema: OpSchema) -> OutputSharding:
+    return OutputSharding(op_schema.args_schema[0])

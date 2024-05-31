@@ -8,12 +8,9 @@
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
-import functools
-import operator
 from typing import Dict, List, Optional, Sequence, Tuple, cast
 
 import torch
-import torch.distributed as dist
 from optree import tree_flatten, tree_unflatten
 
 import vescale.dtensor.dtensor as dtensor
@@ -321,16 +318,6 @@ def _operator_dispatch(
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
         else:
             local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
-
-    # communicate the result to all ranks for some operators that return scalar value
-    if output_sharding.output_spec is None:
-        if op_call == aten.equal.default:
-            obj_list = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
-            obj_list = list(filter(lambda x: x is not None, obj_list))
-            # perform reduce on the collection with AND op
-            # :NOTE: here is an implicit communication
-            local_results = functools.reduce(operator.and_, obj_list, True)
 
     # fill tensor_meta for replicate output as it bypassed tensor_meta prop # TODO: move to `_post_patch_for_dispatch`?
     if (

@@ -51,7 +51,7 @@ class Range:
 class OptimizerStateSpec:
     """This class represents mapping between local flattened 1D tensor
     and global original DTensor in DOptimzier, it is used for
-    loading or saving optimizer states using OmniStore (PyTorch DCP)
+    loading or saving optimizer states using vescale.checkpoint (PyTorch DCP)
     and load-time checkpoint resharding when changing tp size or dp size.
 
     For example, a linear layer in Vescale is DTensor(size=[1024, 1024])
@@ -85,7 +85,7 @@ class OptimizerStateSpec:
     global_offset: Tuple[int]
     # The unflattened local tensor after create view using local_shape on the flattened 1D Tensor in DOptimizer
     # NOTE: In order to support TP resharding and state cross dp ranks, we defer the reshaping from 1D to local_shape
-    # to generate saving plan using OmniStore (PyTorch DCP)
+    # to generate saving plan using vescale.checkpoint (PyTorch DCP)
     local_tensor: torch.Tensor
     # If the current optimizer state is sharded by multiple dp ranks,
     # we should record all ranks and their ranges
@@ -244,7 +244,7 @@ class DistributedOptimizer(OptimizerBase):
         self.overlap_param_gather = overlap_param_gather
         self.grad_to_fp32 = grad_to_fp32
 
-        # Model parameter sharding info for omnistore checkpointing
+        # Model parameter sharding info for vescale.checkpoint
         self.param_to_name = {}
         self.param_shard_info = {}
         self.param_global_shape_info = {}
@@ -321,8 +321,8 @@ class DistributedOptimizer(OptimizerBase):
                         except Exception:
                             storage = bucket.data.storage().untyped()
 
-                    # Typed param buffer.
-                    param_buffer = torch.tensor(storage, dtype=self.main_param_dtype, device=bucket.data.device)
+                    # use tensor._set(storage) to avoid unnecessary memory allocation.
+                    param_buffer = torch.tensor([], dtype=self.main_param_dtype, device=storage.device).set_(storage)
 
                     # .storage() ignores views / slices, so param_buffer now points to the start
                     # of the grad_buffer instead of to the start of each bucket. As a result,

@@ -9,90 +9,34 @@
 ################################################################################
 import io
 import dataclasses
-import logging
 import torch
-from typing import Any, Dict, Union, List, Tuple
+from typing import Any, Dict, Union, List, Tuple, Optional
 from torch.distributed.checkpoint.default_planner import (
     DefaultSavePlanner,
     DefaultLoadPlanner,
 )
+
+import mmh3
+
+from vescale.checkpoint.planner.common import P2PTensorsInfo, sort_rank_ranges, PlanLRUCache, custom_dedup_tensors
 import math
 import torch.distributed as dist
-from torch.distributed.checkpoint.planner import (
-    SavePlan,
-    LoadPlan,
-    ReadItem,
-    WriteItem,
-    WriteItemType,
-)
-from vescale.optim.distributed_optimizer import OptimizerStateSpec
-from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from torch.distributed.checkpoint.planner import SavePlan, LoadPlan, WriteItem, ReadItem
 from torch.distributed.checkpoint.metadata import MetadataIndex, Metadata
+from vescale.optim.distributed_optimizer import OptimizerStateSpec
 from vescale.dtensor import DTensor
-from .vescale_planner_helpers import (
-    _create_write_items,
-    _create_read_items,
-    find_state_dict_object,
-)
-
+from .vescale_planner_helpers import _create_write_items, _create_read_items, find_state_dict_object
 from vescale.devicemesh_api import VESCALE_DEVICE_MESH
+from ...api.meta_type import STATE_DICT_STR
+from ...utilities.logger import get_vescale_checkpoint_logger
 
-logger: logging.Logger = logging.getLogger(__file__)
-
+logger = get_vescale_checkpoint_logger()
 __all__ = [
     "VeScaleSavePlanner",
     "VeScaleLoadPlanner",
     "create_default_local_load_plan",
     "create_default_local_save_plan",
 ]
-
-
-def sort_rank_ranges(process_list: List[Tuple]) -> List[Tuple]:
-    """
-    Decide which rank is receiver and writer
-    Let rank with most parameters receives and writes tensors
-    for the best communication cost
-    If two ranks has the same data size, choose the smaller rank
-    Args:
-        A process list with tuples, each tuple is (rank, data_size)
-    Returns:
-        A sorted list, data size are sorted in descending order,
-        if two ranks has the same data size, ranks are in the asceonding order
-    """
-    sorted_process_list = sorted(process_list, key=lambda x: (-x[1], x[0]))
-    return sorted_process_list
-
-
-def custom_dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
-    """
-    A function to remove duplicate tensors to write
-    when creating global writing plan for saving checkpoint
-    """
-    all_plans = list(all_plans)
-    key_to_plan: Dict[MetadataIndex, List[int]] = {}
-    for plan_idx, plan in enumerate(all_plans):
-        for write_item in plan.items:
-            # NOTE: the only difference from pytorch official
-            if write_item.type != WriteItemType.SHARD:
-                key_to_plan.setdefault(write_item.index, []).append(plan_idx)
-
-    replicated_items = {k: v for k, v in key_to_plan.items() if len(v) > 1}
-
-    # Remove duplicates by always keeping the first entry.
-    # Compute the per-rank remove set.
-    plan_to_keys: Dict[int, List[MetadataIndex]] = {}
-    for key, plans in replicated_items.items():
-        for plan_idx in plans[1:]:
-            plan_to_keys.setdefault(plan_idx, []).append(key)
-    logger.info("Duplicate keys to remove: %s", plan_to_keys)
-
-    for plan_idx, keys in plan_to_keys.items():
-        key_set = set(keys)
-        # rewrite items and remove elements
-        new_items = [write_item for write_item in all_plans[plan_idx].items if write_item.index not in key_set]
-        all_plans[plan_idx] = dataclasses.replace(all_plans[plan_idx], items=new_items)
-
-    return all_plans
 
 
 class VeScaleLoadPlanner(DefaultLoadPlanner):
@@ -127,16 +71,6 @@ def create_default_local_load_plan(state_dict: Dict[str, Any], metadata: Metadat
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_read_items(fqn, md, obj)
-        elif isinstance(obj, ShardedTensor):
-            # For veScale DOptimizer, it will provide empty shards
-            # if current process does not own the shard of tensor
-            local_shards = obj.local_shards()
-            total_size = 0
-            for local_shard in local_shards:
-                for size in local_shard.metadata.shard_sizes:
-                    size += total_size
-            if size > 0:
-                requests += _create_read_items(fqn, md, obj)
         elif isinstance(obj, OptimizerStateSpec):
             # If the state is distributed on multiple dp ranks
             # Read with local_shape, then in DOptimizer then
@@ -163,48 +97,75 @@ class VeScaleSavePlanner(DefaultSavePlanner):
 
     def __init__(self):
         super().__init__()
+        self._plan_cache = PlanLRUCache()
 
     def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
         object = self.lookup_object(write_item.index)
         return self.transform_object(write_item, object)
 
-    def create_local_plan(self) -> SavePlan:
-        plan = create_default_local_save_plan(self.state_dict, self.is_coordinator)
+    def create_local_plan(self) -> Tuple[SavePlan, P2PTensorsInfo]:
+        plan, p2p_tensors_info = create_default_local_save_plan(self.state_dict, self.is_coordinator)
         if self.flatten_state_dict:
             plan = dataclasses.replace(plan, planner_data=self.mappings)
         self.plan = plan
-        return self.plan
+        return self.plan, p2p_tensors_info
 
     def lookup_object(self, index: MetadataIndex) -> Any:
         return find_state_dict_object(self.state_dict, index)
 
+    def lookup_plan_meta(self) -> Optional[Tuple[SavePlan, Metadata]]:
+        if not hasattr(self, STATE_DICT_STR):
+            return None
+        else:
+            device_mesh = VESCALE_DEVICE_MESH.get()
+            plan_key = hash((frozenset(self.state_dict.keys()), self.is_coordinator, device_mesh))
+            return self._plan_cache.get(plan_key)
+
+    def cache_plan_meta(self, new_plan: SavePlan, new_metadata: Metadata) -> None:
+        device_mesh = VESCALE_DEVICE_MESH.get()
+        plan_key = hash((frozenset(self.state_dict.keys()), self.is_coordinator, device_mesh))
+        self._plan_cache.put(plan_key, new_plan, new_metadata)
+
+    def clear_cache(self) -> None:
+        self._plan_cache.clear()
+
+    def dedup_plans(self, all_plans: List[SavePlan]) -> List[SavePlan]:
+        # Use customized deduplicate function for load balance
+        all_plans = custom_dedup_tensors(all_plans)
+        return all_plans
+
+    def create_dedup_global_plan(self, all_plans: List[SavePlan]) -> Tuple[List[SavePlan], Metadata]:
+        # Disable DCP's dedup replicated tensors function
+        self.dedup_replicated_tensors = False
+        rst_value = super().create_global_plan(all_plans)
+        return rst_value
+
     def create_global_plan(self, all_plans: List[SavePlan]) -> Tuple[List[SavePlan], Metadata]:
-        self.dedup_replicated_tensors = True
-        # all_plans = custom_dedup_tensors(all_plans)
+        # Disable DCP's dedup replicated tensors function
+        self.dedup_replicated_tensors = False
+        # Use customized deduplicate function for load balance
+        all_plans = custom_dedup_tensors(all_plans)
         rst_value = super().create_global_plan(all_plans)
         return rst_value
 
 
 def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: bool) -> SavePlan:
     """
-    A function for creating local saving plan for saving checkpoint
+    A function for creating local saving plan for saving checkpoint.
     """
     requests = []
+    # Key: fqn
+    # Value: dictionary (Key is the process rank, value is tensor to receive)
+    recv_tensors = {}
+
+    send_p2p_reqs = []
+    recv_p2p_reqs = {}
+
     for fqn, obj in state_dict.items():
         # Since DTensor supports submesh, adding extra check to ensure _create_write_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
-                requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, ShardedTensor):
-            # For veScale DOptimizer, it will provide empty shards
-            # if current process does not own the shard of tensor
-            local_shards = obj.local_shards()
-            total_size = 0
-            for local_shard in local_shards:
-                for size in local_shard.metadata.shard_sizes:
-                    size += total_size
-            if size > 0:
                 requests += _create_write_items(fqn, obj)
         elif isinstance(obj, OptimizerStateSpec):
             # Create write requests if the process is the real writer
@@ -213,14 +174,14 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                 for rank, param_range in obj.dp_ranks_ranges.items():
                     process_list.append((rank, len(param_range)))
                 sorted_list = sort_rank_ranges(process_list)
-                writer_rank = sorted_list[0][0]
-                p2p_ops = []
-                recv_tensors = {}
-
+                writer_rank = sorted_list[mmh3.hash(fqn) % len(sorted_list)][0]
+                send_ops_to_start = []
+                recv_ops_to_start = {}
                 # Case 1: I am writer
                 # Receive tensors
-
+                logger.debug(f"fqn={fqn} is a tensor across dp ranks. writer rank={writer_rank}")
                 if dist.get_rank() == writer_rank:
+                    recv_tensors[fqn] = {}
                     for k, param_range in obj.dp_ranks_ranges.items():
                         if k != dist.get_rank():
                             recv_tensor = torch.zeros(
@@ -232,8 +193,8 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                                 peer=k,
                                 group=VESCALE_DEVICE_MESH.get_data_parallel_dim_groups(),
                             )
-                            recv_tensors[k] = recv_tensor
-                            p2p_ops.append(recv_op)
+                            recv_tensors[fqn][k] = (recv_tensor, param_range)
+                            recv_ops_to_start[k] = recv_op
                 else:
                     # Case 2: I am not writer
                     # Send my tensor
@@ -243,31 +204,39 @@ def create_default_local_save_plan(state_dict: Dict[str, Any], is_coordinator: b
                         peer=writer_rank,
                         group=VESCALE_DEVICE_MESH.get_data_parallel_dim_groups(),
                     )
-                    p2p_ops.append(send_op)
+                    send_ops_to_start.append(send_op)
 
-                reqs = dist.batch_isend_irecv(p2p_ops)
+                send_reqs = []
+                recv_reqs = []
+                if send_ops_to_start:
+                    send_reqs = dist.batch_isend_irecv(send_ops_to_start)
+                if recv_ops_to_start:
+                    recv_reqs = dist.batch_isend_irecv(list(recv_ops_to_start.values()))
 
-                for req in reqs:
-                    req.wait()
+                if send_reqs:
+                    send_p2p_reqs.extend(send_reqs)
 
-                if writer_rank == dist.get_rank():
-                    new_local_tensor = torch.zeros(
-                        (math.prod(obj.local_shape),), dtype=obj.local_tensor.dtype, device=obj.local_tensor.device
-                    )
-                    new_local_tensor[obj.dp_ranks_ranges[writer_rank].start : obj.dp_ranks_ranges[writer_rank].end] = (
-                        obj.local_tensor
-                    )
-                    for k, param_range in obj.dp_ranks_ranges.items():
-                        if k != writer_rank:
-                            new_local_tensor[param_range.start : param_range.end] = recv_tensors[k]
-                    obj.local_tensor = new_local_tensor
-
-                    obj.local_tensor = obj.local_tensor.reshape(obj.local_shape)
-                    requests += _create_write_items(fqn, obj)
+                if recv_reqs:
+                    recv_p2p_reqs[fqn] = recv_reqs
             else:
                 obj.local_tensor = obj.local_tensor.reshape(obj.local_shape)
                 requests += _create_write_items(fqn, obj)
         elif isinstance(obj, (torch.Tensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
 
-    return SavePlan(requests)
+    # Padding the states across DP ranks
+    # Merge the tensors later
+    writer_rank = dist.get_rank()
+    for fqn in recv_tensors.keys():
+        obj = state_dict[fqn]
+        new_local_tensor = torch.zeros(
+            (math.prod(obj.local_shape),), dtype=obj.local_tensor.dtype, device=obj.local_tensor.device
+        )
+        new_local_tensor[obj.dp_ranks_ranges[writer_rank].start : obj.dp_ranks_ranges[writer_rank].end] = (
+            obj.local_tensor
+        )
+        obj.local_tensor = new_local_tensor
+
+        obj.local_tensor = obj.local_tensor.reshape(obj.local_shape)
+        requests += _create_write_items(fqn, obj)
+    return SavePlan(requests), P2PTensorsInfo(recv_tensors, send_p2p_reqs, recv_p2p_reqs)

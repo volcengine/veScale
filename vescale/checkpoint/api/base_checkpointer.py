@@ -15,6 +15,12 @@
 #
 ################################################################################
 from .meta_type import CheckpointState
+from typing import Dict, List
+from concurrent.futures import Future, ProcessPoolExecutor
+from torch.distributed.checkpoint.storage import WriteResult
+from .meta_type import MODEL_STR, OPTIMIZER_STR
+
+SUPPORTED_TYPES = {MODEL_STR, OPTIMIZER_STR}
 
 
 class BaseCheckpointer:
@@ -23,25 +29,49 @@ class BaseCheckpointer:
     It is designed for extension across various training frameworks.
     """
 
+    # Async IO related members.
+    state_io_workers: Dict[str, ProcessPoolExecutor] = {}
+    state_write_futures: Dict[str, Future[List[WriteResult]]] = {}
+
     @classmethod
     def save(cls, path: str, checkpoint_state: CheckpointState):
         """
         A Method for saving checkpoint
         Args:
             path: Defines the storage path for checkpoint.
-            checkpoint_state: A dictionary contains key-value pairs for model, optimizer and dataloader(TODO).
+            checkpoint_state: A dictionary contains key-value pairs for model and optimizer.
                               - Model: Identified by 'model' key, value should be a model instance.
                               - Optimizer: Identified by 'optimizer' key, value should be an optimizer instance.
+
         """
         raise NotImplementedError()
 
+    @classmethod
     def load(cls, path: str, checkpoint_state: CheckpointState):
         """
         A Method for loading checkpoint
         Args:
             path: Defines the storage path for checkpoint.
-            checkpoint_state: A dictionary contains key-value pairs for model, optimizer and dataloader(TODO).
+            checkpoint_state: A dictionary contains key-value pairs for model and optimizer.
                               - Model: Identified by 'model' key, value should be a model instance.
                               - Optimizer: Identified by 'optimizer' key, value should be an optimizer instance.
+
         """
         raise NotImplementedError()
+
+    @classmethod
+    def _cleanup_futures(cls):
+        """
+        Wait for all write futures to finish before exit, then do the cleanup works.
+
+        WARNING: this method cannot be called by the users.
+        """
+        for key in SUPPORTED_TYPES:
+            if key in cls.state_write_futures:
+                futures = cls.state_write_futures[key]
+                for fut in futures:
+                    fut.result()
+                cls.state_write_futures[key] = []
+                if cls.state_io_workers[key] is not None:
+                    cls.state_io_workers[key].shutdown()
+                    cls.state_io_workers[key] = None

@@ -20,11 +20,11 @@
 import grpc
 
 from . import (
-    mem_file_service_pb2 as OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2,
+    mem_file_service_pb2 as checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2,
 )
 
 
-class OmniStoreMemFileServiceStub:
+class VeScaleCheckpointMemFileServiceStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -34,38 +34,38 @@ class OmniStoreMemFileServiceStub:
             channel: A grpc.Channel.
         """
         self.Write = channel.stream_unary(
-            "/OmniStoreMemFileService/Write",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreWriteRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreWriteResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Write",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointWriteRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointWriteResponse.FromString,
         )
         self.Read = channel.unary_stream(
-            "/OmniStoreMemFileService/Read",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreReadRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreReadResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Read",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointReadRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointReadResponse.FromString,
         )
         self.Rename = channel.unary_unary(
-            "/OmniStoreMemFileService/Rename",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRenameRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRenameResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Rename",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRenameRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRenameResponse.FromString,
         )
         self.Remove = channel.unary_unary(
-            "/OmniStoreMemFileService/Remove",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRemoveRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRemoveResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Remove",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRemoveRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRemoveResponse.FromString,
         )
         self.Listdir = channel.unary_unary(
-            "/OmniStoreMemFileService/Listdir",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreListdirRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreListdirResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Listdir",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointListdirRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointListdirResponse.FromString,
         )
         self.Exists = channel.unary_unary(
-            "/OmniStoreMemFileService/Exists",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreExistsRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreExistsResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Exists",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointExistsRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointExistsResponse.FromString,
         )
 
 
-class OmniStoreMemFileServiceServicer:
+class VeScaleCheckpointMemFileServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Write(self, request_iterator, context):
@@ -105,45 +105,45 @@ class OmniStoreMemFileServiceServicer:
         raise NotImplementedError("Method not implemented!")
 
 
-def add_OmniStoreMemFileServiceServicer_to_server(servicer, server):
+def add_VeScaleCheckpointMemFileServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "Write": grpc.stream_unary_rpc_method_handler(
             servicer.Write,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreWriteRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreWriteResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointWriteRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointWriteResponse.SerializeToString,
         ),
         "Read": grpc.unary_stream_rpc_method_handler(
             servicer.Read,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreReadRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreReadResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointReadRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointReadResponse.SerializeToString,
         ),
         "Rename": grpc.unary_unary_rpc_method_handler(
             servicer.Rename,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRenameRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRenameResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRenameRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRenameResponse.SerializeToString,
         ),
         "Remove": grpc.unary_unary_rpc_method_handler(
             servicer.Remove,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRemoveRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRemoveResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRemoveRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRemoveResponse.SerializeToString,
         ),
         "Listdir": grpc.unary_unary_rpc_method_handler(
             servicer.Listdir,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreListdirRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreListdirResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointListdirRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointListdirResponse.SerializeToString,
         ),
         "Exists": grpc.unary_unary_rpc_method_handler(
             servicer.Exists,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreExistsRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreExistsResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointExistsRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointExistsResponse.SerializeToString,
         ),
     }
-    generic_handler = grpc.method_handlers_generic_handler("OmniStoreMemFileService", rpc_method_handlers)
+    generic_handler = grpc.method_handlers_generic_handler("VeScaleCheckpointMemFileService", rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
 # This class is part of an EXPERIMENTAL API.
-class OmniStoreMemFileService:
+class VeScaleCheckpointMemFileService:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -162,9 +162,9 @@ class OmniStoreMemFileService:
         return grpc.experimental.stream_unary(
             request_iterator,
             target,
-            "/OmniStoreMemFileService/Write",
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreWriteRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreWriteResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Write",
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointWriteRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointWriteResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -191,9 +191,9 @@ class OmniStoreMemFileService:
         return grpc.experimental.unary_stream(
             request,
             target,
-            "/OmniStoreMemFileService/Read",
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreReadRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreReadResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Read",
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointReadRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointReadResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -220,9 +220,9 @@ class OmniStoreMemFileService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreMemFileService/Rename",
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRenameRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRenameResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Rename",
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRenameRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRenameResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -249,9 +249,9 @@ class OmniStoreMemFileService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreMemFileService/Remove",
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRemoveRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreRemoveResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Remove",
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRemoveRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointRemoveResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -278,9 +278,9 @@ class OmniStoreMemFileService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreMemFileService/Listdir",
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreListdirRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreListdirResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Listdir",
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointListdirRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointListdirResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -307,9 +307,9 @@ class OmniStoreMemFileService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreMemFileService/Exists",
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreExistsRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_mem__file__service__pb2.OmniStoreExistsResponse.FromString,
+            "/VeScaleCheckpointMemFileService/Exists",
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointExistsRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_mem__file__service__pb2.VeScaleCheckpointExistsResponse.FromString,
             options,
             channel_credentials,
             insecure,

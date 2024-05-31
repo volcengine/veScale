@@ -10,9 +10,8 @@
 
 from typing import Any, List
 import torch
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.metadata import ShardMetadata
-from torch.distributed.checkpoint.planner import WriteItem, WriteItemType, ReadItem, LoadItemType, TensorWriteData
+from torch.distributed.checkpoint.planner import WriteItem, ReadItem, WriteItemType, LoadItemType, TensorWriteData
 from torch.distributed.checkpoint.metadata import (
     STATE_DICT_TYPE,
     STORAGE_TYPES,
@@ -22,7 +21,6 @@ from torch.distributed.checkpoint.metadata import (
     TensorStorageMetadata,
 )
 from torch.distributed._shard.sharded_tensor import TensorProperties
-from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed.checkpoint.resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
@@ -52,23 +50,6 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     sizes = torch.Size(compute_local_shape(tensor.shape, tensor.device_mesh, tensor.placements))
     offsets = torch.Size(compute_local_offset(tensor.shape, tensor.device_mesh, tensor.placements))
     return ChunkStorageMetadata(offsets=offsets, sizes=sizes)
-
-
-def _sharded_tensor_metadata(sharded_tensor: ShardedTensor, shard_md: ShardMetadata) -> TensorWriteData:
-    return TensorWriteData(
-        chunk=_chunk_for_shard(shard_md),
-        properties=sharded_tensor.metadata().tensor_properties,
-        size=sharded_tensor.metadata().size,
-    )
-
-
-def _create_write_item_for_shard(fqn: str, sharded_tensor: ShardedTensor, shard_md: ShardMetadata) -> WriteItem:
-    offsets = torch.Size(shard_md.shard_offsets)
-    return WriteItem(
-        index=MetadataIndex(fqn, offsets),
-        type=WriteItemType.SHARD,
-        tensor_data=_sharded_tensor_metadata(sharded_tensor, shard_md),
-    )
 
 
 def _create_write_item_for_tensor(fqn: str, tensor: torch.Tensor) -> WriteItem:
@@ -109,8 +90,6 @@ def _create_write_item_for_bytesio(fqn: str, bytes: Any):
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
     if isinstance(object, DTensor):
         return [_create_write_items_for_dtensor(fqn, object)]
-    elif isinstance(object, ShardedTensor):
-        return [_create_write_item_for_shard(fqn, object, shard.metadata) for shard in object.local_shards()]
     elif isinstance(object, torch.Tensor):
         return [_create_write_item_for_tensor(fqn, object)]
     elif isinstance(object, OptimizerStateSpec):
@@ -206,8 +185,6 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
         if isinstance(obj, DTensor):
             local_chunks = [_create_chunk_from_dtensor(obj)]
-        elif isinstance(obj, ShardedTensor):
-            local_chunks = [_chunk_for_shard(shard.metadata) for shard in obj.local_shards()]
         elif isinstance(obj, torch.Tensor):
             local_chunks = [_create_chunk_from_tensor(obj)]
         elif isinstance(obj, OptimizerStateSpec):
@@ -236,32 +213,14 @@ def _chunk_for_shard(shard_md: ShardMetadata) -> ChunkStorageMetadata:
     )
 
 
-def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
-    if index.offset is None:
-        raise ValueError(f"Cannot lookup {index.fqn} since its a ShardedTensor and no offset was provided")
-
-    shards = tensor.local_shards()
-    # index fast path
-    if index.index is not None:
-        if len(shards) > index.index and torch.Size(shards[index.index].metadata.shard_offsets) == index.offset:
-            return shards[index.index]
-
-    for shard in shards:
-        if torch.Size(shard.metadata.shard_offsets) == index.offset:
-            return shard
-    raise ValueError(f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'")
-
-
 def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
     if isinstance(tensor, DTensor):
-        return tensor._local_tensor  # keep out of autograd
-    if isinstance(tensor, ShardedTensor):
-        return _find_shard(tensor, index).tensor
+        return tensor.to_local()
     if index.offset is not None:
         # special case looking up a tensor by origin
         if index.offset == torch.Size([0] * len(tensor.size())):
             return tensor
-        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
+        raise ValueError(f"FQN: '{index.fqn}' is not a DTensor, can't find by offset: '{index.offset}'")
     return tensor
 
 
@@ -279,6 +238,6 @@ def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) ->
         return obj.local_tensor
     elif index.offset is not None:
         raise ValueError(
-            f"FQN: '{index.fqn}' is not a ShardedTensor, it is a {type(obj)} can't find by offset: '{index.offset}'"
+            f"FQN: '{index.fqn}' is not a DTensor, it is a {type(obj)} can't find by offset: '{index.offset}'"
         )
     return obj

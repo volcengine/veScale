@@ -13,6 +13,7 @@ from typing import Callable, Dict, Iterable, Optional, Sequence, Set, Tuple, Uni
 
 import torch
 from torch import Tensor
+import warnings
 
 from vescale.dtensor._utils import compute_local_shape
 from vescale.dtensor.op_schema import OpSchema, OutputSharding, RuntimeSchemaInfo
@@ -294,6 +295,22 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
     assert from_nelem == prod(to_size), "Total view shape does not add up"
+
+    if from_nelem == 0:
+        warnings.warn("An empty tensor is encountered during a view or reshape operation.", UserWarning)
+
+        flattened = Flatten.new(tuple(InputDim(fi) for fi in range(len(from_size)) if from_size[fi] != 1))
+        to_group_shape = [t for t in to_size if t != 1]
+        result_pp = []
+        i = 0
+        for t in to_size:
+            if t == 1:
+                result_pp.append(Singleton())
+            else:
+                result_pp.append(Split.new(flattened, tuple(to_group_shape), i))
+                i += 1
+
+        return tuple(result_pp)
 
     from_idx = 0
     to_idx = 0

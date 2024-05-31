@@ -31,7 +31,6 @@ from vescale.dtensor.op_schema import (
     TupleStrategy,
 )
 from vescale.dtensor.placement_types import TensorMeta
-from vescale.dtensor._dispatch_bypass import _bypass_for_sharding_prop
 
 aten = torch.ops.aten
 
@@ -153,9 +152,6 @@ class ShardingPropagator:
                     spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
-        # bypass sharding prop of some ops for speed-up
-        if _bypass_for_sharding_prop(op_info):
-            return
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,

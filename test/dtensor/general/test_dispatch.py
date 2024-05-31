@@ -75,6 +75,13 @@ class TestBypassOps(DTensorTestBase):
         dtensor3 = DTensor.from_local(local_tensor3, device_mesh, [Shard(0)])
         self.assertTrue(aten.equal(dtensor1, dtensor3) is False)
 
+        if self.rank % 2 == 0:
+            local_tensor4 = torch.ones((2, 8), dtype=torch.float32, device="cuda")
+        else:
+            local_tensor4 = torch.zeros((2, 8), dtype=torch.float32, device="cuda")
+        dtensor4 = DTensor.from_local(local_tensor4, device_mesh, [Shard(0)])
+        self.assertTrue(aten.equal(dtensor1, dtensor4) is False)
+
     @skip_unless_torch_gpu
     @with_comms
     def test_local_scalar_dense(self):

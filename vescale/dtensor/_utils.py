@@ -9,6 +9,7 @@
 ################################################################################
 
 import warnings
+import copy
 from typing import List, Sequence, Tuple, Optional, Dict, Set, Union
 
 import torch
@@ -440,3 +441,23 @@ def compute_local_offset(global_shape: ShapeType, mesh: DeviceMesh, placements: 
                 local_shape[shard_dim] = shard_size
                 local_offsets[shard_dim] = shard_offset
         return tuple(local_offsets)
+
+
+def compute_global_stride(
+    local_tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> Tuple[int, ...]:
+    """ """
+    my_coordinate = mesh.get_coordinate()
+    if my_coordinate is None:
+        return ()
+    if not local_tensor.is_contiguous():
+        raise RuntimeError("local tensor should be contiguous")
+    global_stride = copy.deepcopy(list(local_tensor.stride()))
+    for i, p in enumerate(placements):
+        if not p.is_shard():
+            continue
+        shard_dim = p.dim
+        shard_size = mesh.size(i)
+        for j in range(shard_dim):
+            global_stride[j] *= shard_size
+    return tuple(global_stride)

@@ -19,10 +19,12 @@
 
 import grpc
 
-from . import report_service_pb2 as OmniStore_dot_utilities_dot_server_dot_report__service__pb2
+from . import (
+    report_service_pb2 as checkpoint_dot_utilities_dot_server_dot_report__service__pb2,
+)
 
 
-class OmniStoreReportServiceStub:
+class VeScaleCheckpointReportServiceStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -32,23 +34,23 @@ class OmniStoreReportServiceStub:
             channel: A grpc.Channel.
         """
         self.Gather = channel.unary_unary(
-            "/OmniStoreReportService/Gather",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGatherRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGatherResponse.FromString,
+            "/VeScaleCheckpointReportService/Gather",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGatherRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGatherResponse.FromString,
         )
         self.Broadcast = channel.unary_unary(
-            "/OmniStoreReportService/Broadcast",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreBroadcastRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreBroadcastResponse.FromString,
+            "/VeScaleCheckpointReportService/Broadcast",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointBroadcastRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointBroadcastResponse.FromString,
         )
         self.GetStatus = channel.unary_unary(
-            "/OmniStoreReportService/GetStatus",
-            request_serializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGetStatusRequest.SerializeToString,
-            response_deserializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGetStatusResponse.FromString,
+            "/VeScaleCheckpointReportService/GetStatus",
+            request_serializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGetStatusRequest.SerializeToString,
+            response_deserializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGetStatusResponse.FromString,
         )
 
 
-class OmniStoreReportServiceServicer:
+class VeScaleCheckpointReportServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Gather(self, request, context):
@@ -70,30 +72,30 @@ class OmniStoreReportServiceServicer:
         raise NotImplementedError("Method not implemented!")
 
 
-def add_OmniStoreReportServiceServicer_to_server(servicer, server):
+def add_VeScaleCheckpointReportServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "Gather": grpc.unary_unary_rpc_method_handler(
             servicer.Gather,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGatherRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGatherResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGatherRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGatherResponse.SerializeToString,
         ),
         "Broadcast": grpc.unary_unary_rpc_method_handler(
             servicer.Broadcast,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreBroadcastRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreBroadcastResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointBroadcastRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointBroadcastResponse.SerializeToString,
         ),
         "GetStatus": grpc.unary_unary_rpc_method_handler(
             servicer.GetStatus,
-            request_deserializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGetStatusRequest.FromString,
-            response_serializer=OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGetStatusResponse.SerializeToString,
+            request_deserializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGetStatusRequest.FromString,
+            response_serializer=checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGetStatusResponse.SerializeToString,
         ),
     }
-    generic_handler = grpc.method_handlers_generic_handler("OmniStoreReportService", rpc_method_handlers)
+    generic_handler = grpc.method_handlers_generic_handler("VeScaleCheckpointReportService", rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
 # This class is part of an EXPERIMENTAL API.
-class OmniStoreReportService:
+class VeScaleCheckpointReportService:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -112,9 +114,9 @@ class OmniStoreReportService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreReportService/Gather",
-            OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGatherRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGatherResponse.FromString,
+            "/VeScaleCheckpointReportService/Gather",
+            checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGatherRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGatherResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -141,9 +143,9 @@ class OmniStoreReportService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreReportService/Broadcast",
-            OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreBroadcastRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreBroadcastResponse.FromString,
+            "/VeScaleCheckpointReportService/Broadcast",
+            checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointBroadcastRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointBroadcastResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -170,9 +172,9 @@ class OmniStoreReportService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/OmniStoreReportService/GetStatus",
-            OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGetStatusRequest.SerializeToString,
-            OmniStore_dot_utilities_dot_server_dot_report__service__pb2.OmniStoreGetStatusResponse.FromString,
+            "/VeScaleCheckpointReportService/GetStatus",
+            checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGetStatusRequest.SerializeToString,
+            checkpoint_dot_utilities_dot_server_dot_report__service__pb2.VeScaleCheckpointGetStatusResponse.FromString,
             options,
             channel_credentials,
             insecure,

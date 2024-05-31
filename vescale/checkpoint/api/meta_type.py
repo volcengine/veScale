@@ -7,7 +7,7 @@
 ################################################################################
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
-# meta_type.py saves all constants and data types commonly used in omnistore
+# meta_type.py saves all constants and data types commonly used in vescale.checkpoint
 
 from enum import Enum
 from typing import Dict, Any, TypeVar
@@ -18,7 +18,7 @@ STATE_DICT_TYPE = Dict[str, Any]
 
 MODEL_STR = "model"
 OPTIMIZER_STR = "optimizer"
-SHM_PATH = "/dev/shm"
+STATE_DICT_STR = "state_dict"
 
 
 class SupportedStrategy(Enum):

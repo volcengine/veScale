@@ -49,7 +49,7 @@ def get_mem_server_sock_file(name: str):
     return f"/var/tmp/mem_server_{name}.sock"
 
 
-class MemFileServicer(mem_file_service_pb2_grpc.OmniStoreMemFileServiceServicer):
+class MemFileServicer(mem_file_service_pb2_grpc.VeScaleCheckpointMemFileServiceServicer):
     def __init__(self):
         self._d = _Directory()
 
@@ -66,7 +66,7 @@ class MemFileServicer(mem_file_service_pb2_grpc.OmniStoreMemFileServiceServicer)
         if name:
             with d.lock:
                 d[bn] = _File(content=b.getvalue())
-        return mem_file_service_pb2.OmniStoreWriteResponse()
+        return mem_file_service_pb2.VeScaleCheckpointWriteResponse()
 
     def Read(self, req, ctx: grpc.ServicerContext):
         d, bn = self._iterate_dir(req.name, ctx)
@@ -76,7 +76,7 @@ class MemFileServicer(mem_file_service_pb2_grpc.OmniStoreMemFileServiceServicer)
             f: _File = d[bn]
         cur = 0
         while cur < len(f.content):
-            yield mem_file_service_pb2.OmniStoreReadResponse(content=f.content[cur : cur + _CHUNK_SIZE])
+            yield mem_file_service_pb2.VeScaleCheckpointReadResponse(content=f.content[cur : cur + _CHUNK_SIZE])
             cur += _CHUNK_SIZE
 
     def Rename(self, req, ctx: grpc.ServicerContext):
@@ -92,7 +92,7 @@ class MemFileServicer(mem_file_service_pb2_grpc.OmniStoreMemFileServiceServicer)
                 ctx.abort(grpc.StatusCode.ALREADY_EXISTS, f"{req.dst} already exists.")
             d[dst_bn] = d[src_bn]
             del d[src_bn]
-        return mem_file_service_pb2.OmniStoreRenameResponse()
+        return mem_file_service_pb2.VeScaleCheckpointRenameResponse()
 
     def Remove(self, req, ctx: grpc.ServicerContext):
         d, bn = self._iterate_dir(req.name, ctx)
@@ -100,14 +100,14 @@ class MemFileServicer(mem_file_service_pb2_grpc.OmniStoreMemFileServiceServicer)
             ctx.abort(grpc.StatusCode.NOT_FOUND, f"{req.name} not found.")
         with d.lock:
             del d[bn]
-        return mem_file_service_pb2.OmniStoreRemoveResponse()
+        return mem_file_service_pb2.VeScaleCheckpointRemoveResponse()
 
     def Listdir(self, req, ctx: grpc.ServicerContext):
         d, _ = self._iterate_dir(os.path.join(req.name, "*"))
         if d is None:
-            return mem_file_service_pb2.OmniStoreListdirResponse()
+            return mem_file_service_pb2.VeScaleCheckpointListdirResponse()
 
-        resp = mem_file_service_pb2.OmniStoreListdirResponse()
+        resp = mem_file_service_pb2.VeScaleCheckpointListdirResponse()
         with d.lock:
             for name in d:
                 resp.names.append(name)
@@ -116,9 +116,9 @@ class MemFileServicer(mem_file_service_pb2_grpc.OmniStoreMemFileServiceServicer)
     def Exists(self, req, ctx: grpc.ServicerContext):
         d, bn = self._iterate_dir(req.name)
         if d is None:
-            return mem_file_service_pb2.OmniStoreExistsResponse(exists=False)
+            return mem_file_service_pb2.VeScaleCheckpointExistsResponse(exists=False)
         with d.lock:
-            return mem_file_service_pb2.OmniStoreExistsResponse(exists=bn in d)
+            return mem_file_service_pb2.VeScaleCheckpointExistsResponse(exists=bn in d)
 
     def _iterate_dir(self, name: str, ctx: grpc.ServicerContext = None, create=False) -> Tuple[_Directory, str]:
         if ctx is None:
@@ -152,7 +152,7 @@ def start_server(name: str, force=False):
     if os.path.exists(sock) and not force:
         raise OSError("Mem server is already running.")
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    mem_file_service_pb2_grpc.add_OmniStoreMemFileServiceServicer_to_server(MemFileServicer(), server)
+    mem_file_service_pb2_grpc.add_VeScaleCheckpointMemFileServiceServicer_to_server(MemFileServicer(), server)
     server.add_insecure_port(f"unix:{sock}")
     server.start()
     return server
@@ -180,12 +180,12 @@ def _get_mem_name_and_name(path: str):
 
 def _get_stub_and_name(
     path: str,
-) -> Tuple[mem_file_service_pb2_grpc.OmniStoreMemFileServiceStub, str]:
+) -> Tuple[mem_file_service_pb2_grpc.VeScaleCheckpointMemFileServiceStub, str]:
     mem_name, name = _get_mem_name_and_name(path)
     if mem_name not in _STUB_CACHE:
         c = grpc.insecure_channel(f"unix:{get_mem_server_sock_file(mem_name)}")
         with _STUB_CACHE_LOCK:
-            _STUB_CACHE[mem_name] = mem_file_service_pb2_grpc.OmniStoreMemFileServiceStub(c)
+            _STUB_CACHE[mem_name] = mem_file_service_pb2_grpc.VeScaleCheckpointMemFileServiceStub(c)
     return _STUB_CACHE[mem_name], name
 
 
@@ -204,7 +204,7 @@ class _FileLike:
     def read_buf(self):
         if self._read_buf is None:
             self._read_buf = io.BytesIO()
-            for resp in self._stub.Read(mem_file_service_pb2.OmniStoreReadRequest(name=self._name)):
+            for resp in self._stub.Read(mem_file_service_pb2.VeScaleCheckpointReadRequest(name=self._name)):
                 self._read_buf.write(resp.content)
             self._read_buf.seek(0)
         return self._read_buf
@@ -223,7 +223,7 @@ class _FileLike:
                     break
                 cur = 0
                 while cur < len(content):
-                    req = mem_file_service_pb2.OmniStoreWriteRequest(content=content[cur : cur + _CHUNK_SIZE])
+                    req = mem_file_service_pb2.VeScaleCheckpointWriteRequest(content=content[cur : cur + _CHUNK_SIZE])
                     if cur == 0:
                         req.name = self._name
                     yield req
@@ -254,18 +254,18 @@ def rename(src, dst, overwrite=False):
     dst_stub, dst_name = _get_stub_and_name(dst)
     if stub != dst_stub:
         raise ValueError(f"Rename across mem file system is not supported. {src} {dst}")
-    stub.Rename(mem_file_service_pb2.OmniStoreRenameRequest(src=src_name, dst=dst_name, overwrite=overwrite))
+    stub.Rename(mem_file_service_pb2.VeScaleCheckpointRenameRequest(src=src_name, dst=dst_name, overwrite=overwrite))
 
 
 def remove(name):
     stub, subname = _get_stub_and_name(name)
-    stub.Remove(mem_file_service_pb2.OmniStoreRemoveRequest(name=subname))
+    stub.Remove(mem_file_service_pb2.VeScaleCheckpointRemoveRequest(name=subname))
 
 
 def listdir(name):
     try:
         stub, subname = _get_stub_and_name(name)
-        resp = stub.Listdir(mem_file_service_pb2.OmniStoreListdirRequest(name=subname))
+        resp = stub.Listdir(mem_file_service_pb2.VeScaleCheckpointListdirRequest(name=subname))
         return list(resp.names)
     except grpc.RpcError as e:
         if e.code() == grpc.StatusCode.UNAVAILABLE:
@@ -276,7 +276,7 @@ def listdir(name):
 def exists(name):
     try:
         stub, subname = _get_stub_and_name(name)
-        resp = stub.Exists(mem_file_service_pb2.OmniStoreExistsRequest(name=subname))
+        resp = stub.Exists(mem_file_service_pb2.VeScaleCheckpointExistsRequest(name=subname))
         return resp.exists
     except grpc.RpcError as e:
         if e.code() == grpc.StatusCode.UNAVAILABLE:
@@ -297,7 +297,7 @@ def wait_until_fs_ready(name: str, timeout=120):
     t0 = time.time()
     while time.time() < t0 + timeout:
         try:
-            stub.Listdir(mem_file_service_pb2.OmniStoreListdirRequest(name="/"))
+            stub.Listdir(mem_file_service_pb2.VeScaleCheckpointListdirRequest(name="/"))
             return True
         except grpc.RpcError as e:
             if e.code() == grpc.StatusCode.UNAVAILABLE:

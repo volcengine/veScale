@@ -66,11 +66,10 @@ class TestNanoGPT1(DTensorTestBase):
             dist_optimizer.step()
 
         # Save the model and optimizer before second data foward
-
-        # OmniStore Style API
         ckpt_state = {"model": ddp_gpt, "optimizer": dist_optimizer}
         vescale.checkpoint.save(TMP_CKPT_DIR, ckpt_state)
-
+        # Clean up writing futures (For unit test only)
+        vescale.checkpoint.VeScaleCheckpointer._VeScaleCheckpointer__cleanup()
         # Dump model state_dict
         dumped_model_sd = {}
         for k, v in ddp_gpt.state_dict().items():
@@ -108,7 +107,6 @@ class TestNanoGPT2(DTensorTestBase):
 
         # Load the model and optimizer after first data
 
-        # OmniStore Style API
         # One line function, model and optimizer will be loaded automatically
         ckpt_state = {"model": ddp_gpt, "optimizer": dist_optimizer}
         vescale.checkpoint.load(TMP_CKPT_DIR, ckpt_state)

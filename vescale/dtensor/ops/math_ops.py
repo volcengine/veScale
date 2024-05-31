@@ -9,6 +9,7 @@
 ################################################################################
 
 from typing import cast, List, Optional, Sequence, Tuple
+from enum import Enum
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -36,6 +37,12 @@ from vescale.dtensor.placement_types import DTensorSpec, Partial, Placement, Rep
 aten = torch.ops.aten
 
 
+class Reduction(Enum):
+    NONE = 0
+    MEAN = 1
+    SUM = 2
+
+
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
     if dims_arg is None:
         return None
@@ -60,6 +67,17 @@ def _infer_reduce_dims_map(reduction_dims: List[int], input_ndim: int, keep_dim=
             new_dim_count += 1
 
     return reduction_dims_map
+
+
+# return new_placements which align with placements but skip the skipped_dim
+def _skip_dim(placements: Tuple[Placement, ...], skipped_dim: int) -> Tuple[Placement, ...]:
+    new_placements: List[Placement] = []
+    for p in placements:
+        if isinstance(p, Shard) and p.dim >= skipped_dim:
+            new_placements.append(Shard(p.dim - 1))
+        else:
+            new_placements.append(p)
+    return tuple(new_placements)
 
 
 def replicate_reduction_dims(placements: Tuple[Placement, ...], reduction_dims: List[int]) -> Tuple[Placement, ...]:

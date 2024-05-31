@@ -34,57 +34,101 @@ _linear_pointwise_ops = {
 }
 
 
-def hack_for_special_op(
-    op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
-):
-    new_args = list(args)
-    op_name = str(op_call)
-    if (
-        op_name == "aten.index_put.default"
-        and not isinstance(args[2], dtensor.DTensor)
-        and isinstance(args[2], torch.Tensor)
-        and isinstance(args[0], dtensor.DTensor)
+class DispatchPrePatch:
+    def __init__(self) -> None:
+        self.op_hackers = {
+            aten.index_put.default: DispatchPrePatch.index_put_handler,
+            aten.scatter_.value: DispatchPrePatch.scatter_handler,
+            aten.scatter.value: DispatchPrePatch.scatter_handler,
+            aten.scatter_.src: DispatchPrePatch.scatter_handler,
+            aten.scatter.src: DispatchPrePatch.scatter_handler,
+            aten.eq.Tensor: DispatchPrePatch.eq_tensor_handler,
+            aten.index.Tensor: DispatchPrePatch.index_tensor_handler,
+        }
+
+    def apply(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ) -> Tuple[Tuple[object, ...], Dict[str, object]]:
+        hack_call = self.op_hackers.get(op_call, None)
+        if hack_call is not None:
+            return hack_call(op_call, args, kwargs)
+        else:
+            return args, kwargs
+
+    @staticmethod
+    def index_put_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
     ):
-        device_mesh = args[0]._spec.mesh
-        sharding = args[0]._spec.placements
-        new_args[2] = dtensor.DTensor.from_local(new_args[2], device_mesh, sharding)
-        return tuple(new_args), kwargs
-    elif (
-        op_name in ["aten.scatter_.value", "aten.scatter.value", "aten.scatter_.src", "aten.scatter.src"]
-        and not isinstance(args[0], dtensor.DTensor)
-        and isinstance(args[0], torch.Tensor)
-        and isinstance(args[2], dtensor.DTensor)
-    ):
-        device_mesh = args[2]._spec.mesh
-        new_args[0] = dtensor.DTensor.from_local(new_args[0], device_mesh, [Replicate()])
-        return tuple(new_args), kwargs
-    elif (
-        str(op_call) == "aten.eq.Tensor"
-        and not isinstance(args[1], dtensor.DTensor)
-        and isinstance(args[0], dtensor.DTensor)
-        and isinstance(args[1], torch.Tensor)
-    ):
-        device_mesh = args[0]._spec.mesh
-        new_args[1] = dtensor.DTensor.from_local(new_args[1], device_mesh, [Replicate()])
-        return tuple(new_args), kwargs
-    # hack to DTensorialize the index of aten.index.Tensor op.
-    elif op_call in [aten.index.Tensor] and isinstance(args[0], dtensor.DTensor):
-        device_mesh = args[0]._spec.mesh
-        new_args = []
-        new_args.append(args[0])
-        new_args.append(
-            [
-                dtensor.DTensor.from_local(x, device_mesh, [Replicate()], run_check=False)
-                if isinstance(x, torch.Tensor) and not isinstance(x, dtensor.DTensor)
-                else x
-                for x in args[1]
-            ]
-        )
-        return tuple(new_args), kwargs
-    else:
+        if (
+            (not isinstance(args[2], dtensor.DTensor))
+            and isinstance(args[2], torch.Tensor)
+            and isinstance(args[0], dtensor.DTensor)
+        ):
+            device_mesh = args[0]._spec.mesh
+            sharding = args[0]._spec.placements
+            new_args_2 = dtensor.DTensor.from_local(args[2], device_mesh, sharding, run_check=False)
+            return (*args[:2], new_args_2, *args[3:]), kwargs
         return args, kwargs
+
+    @staticmethod
+    def scatter_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ):
+        if (
+            (not isinstance(args[0], dtensor.DTensor))
+            and isinstance(args[0], torch.Tensor)
+            and isinstance(args[2], dtensor.DTensor)
+        ):
+            device_mesh = args[2]._spec.mesh
+            new_args_0 = dtensor.DTensor.from_local(args[0], device_mesh, [Replicate()], run_check=False)
+            return (new_args_0, *args[1:]), kwargs
+        return args, kwargs
+
+    @staticmethod
+    def eq_tensor_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ):
+        if (
+            (not isinstance(args[1], dtensor.DTensor))
+            and isinstance(args[0], dtensor.DTensor)
+            and isinstance(args[1], torch.Tensor)
+        ):
+            device_mesh = args[0]._spec.mesh
+            new_args_1 = dtensor.DTensor.from_local(args[1], device_mesh, [Replicate()], run_check=False)
+            return (args[0], new_args_1, *args[2:]), kwargs
+        return args, kwargs
+
+    @staticmethod
+    def index_tensor_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ):
+        if isinstance(args[0], dtensor.DTensor):
+            device_mesh = args[0]._spec.mesh
+            new_args = (
+                args[0],
+                [
+                    dtensor.DTensor.from_local(x, device_mesh, [Replicate()], run_check=False)
+                    if isinstance(x, torch.Tensor) and not isinstance(x, dtensor.DTensor)
+                    else x
+                    for x in args[1]
+                ],
+            )
+            return new_args, kwargs
+        return args, kwargs
+
+
+_dispatch_pre_patch = DispatchPrePatch()
 
 
 def defer_resharding(op_call: torch._ops.OpOverload, dt_wrap: Any):
@@ -151,7 +195,7 @@ def _pre_patch_for_dispatch(*args, **kwargs):
     Put patch logic here before entering dtensor dispatching logic
     """
     failed_on_mqa(*args, **kwargs)
-    return hack_for_special_op(*args, **kwargs)
+    return _dispatch_pre_patch.apply(*args, **kwargs)
 
 
 def _post_patch_for_dispatch(*args, **kwargs):

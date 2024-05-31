@@ -168,9 +168,16 @@ def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
     ), "tensor meta must not be None if you are constructing a sharded tensor using `new_zeros` or something like that"
     original_numel = prod(input_spec.tensor_meta.shape)
     target_numel = prod(output_shape)
-    assert original_numel == target_numel, "for now, we only support the same numel in new_factory methods"
 
     from vescale.dtensor.ops.vescale_view_ops import vescale_view_rule_prop, ops
+
+    if original_numel != target_numel:
+        return OutputSharding(
+            output_spec=DTensorSpec(
+                mesh=mesh,
+                placements=tuple([Replicate()] * mesh.ndim),
+            )
+        )
 
     spec = ops[torch.Tensor.view]
     output_sharding = vescale_view_rule_prop(op_schema=op_schema, spec=spec)

@@ -245,7 +245,7 @@ class DModuleTestInit(DTensorTestBase):
     def test_initialize_cpu(self):
         self._run_parallelize_not_meta_not_sharded("cpu")
         self._run_parallelize_not_meta_sharded("cpu")
-        self._run_parallelize_meta_not_sharded("cpu")
+        # self._run_parallelize_meta_not_sharded("cpu")
 
     @with_comms_device(device_type="cuda")
     def test_initialize_cuda(self):

@@ -22,11 +22,11 @@ import os
 import enum
 import contextlib
 import uuid
-from .logger import get_omnistore_logger
+from .logger import get_vescale_checkpoint_logger
 import shutil
 from .server import mem_server_lib
 
-logger = get_omnistore_logger()
+logger = get_vescale_checkpoint_logger()
 BFILE_DEFAULT_TIMEOUT = None
 
 

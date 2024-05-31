@@ -197,6 +197,11 @@ class DModule:
                                         v, Sequence
                                     ), "the placements for variable position arguments have to be list"
                                     pis[k] = [_norm_one_placements(p) for p in v]
+                                elif isinstance(v, Dict):  # nested dict sharding plan
+                                    pis[k] = {k_: _norm_one_placements(v_) for k_, v_ in v.items()}
+                                elif (isinstance(v, (List, Tuple))) and not isinstance(v[0], Placement):
+                                    # nested list/tuple sharding plan
+                                    pis[k] = [_norm_one_placements(p) for p in v]
                                 else:
                                     pis[k] = _norm_one_placements(v)
                         # register plan

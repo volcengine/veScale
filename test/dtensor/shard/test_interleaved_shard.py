@@ -100,12 +100,16 @@ class InterleavedShardBasicTest(DTensorTestBase):
             self.assertEqual(torch.zeros_like(t), dt2._local_tensor)
 
         # IS -> IS
-        with self.assertRaises(NotImplementedError):
-            dt.redistribute(device_mesh, [InterleavedShard(dim=0, interleaved_size=2)])
+        dt3 = dt.redistribute(device_mesh, [InterleavedShard(dim=0, interleaved_size=2)])
+        reshape_t = t.clone().reshape(2, self.world_size * 4, 3)
+        split_tensor_list = list(torch.chunk(reshape_t, chunks=self.world_size, dim=1))
+        self.assertEqual(split_tensor_list[self.rank].reshape(-1, 3), dt3._local_tensor)
 
         # IS -> S
-        with self.assertRaises(NotImplementedError):
-            dt.redistribute(device_mesh, [Shard(dim=0)])
+        dt4 = dt.redistribute(device_mesh, [Shard(dim=0)])
+        reshape_t = t.clone().reshape(interleaved_size * self.world_size * 2, 3)
+        split_tensor_list = list(torch.chunk(reshape_t, chunks=self.world_size, dim=0))
+        self.assertEqual(split_tensor_list[self.rank], dt4._local_tensor)
 
     @with_comms
     def test_comm_to_interleaved_shard(self):
@@ -130,13 +134,13 @@ class InterleavedShardBasicTest(DTensorTestBase):
 
         # S -> IS
         dt = distribute_tensor(t, device_mesh, [Shard(0)])
-        with self.assertRaises(NotImplementedError):
-            dt.redistribute(device_mesh, [InterleavedShard(dim=0, interleaved_size=interleaved_size)])
+        dt3 = dt.redistribute(device_mesh, [InterleavedShard(dim=0, interleaved_size=interleaved_size)])
+        self.assertEqual(split_tensor_list[self.rank].reshape(-1, 3), dt3._local_tensor)
 
         # IS -> IS
         dt = distribute_tensor(t, device_mesh, [InterleavedShard(dim=0, interleaved_size=2)])
-        with self.assertRaises(NotImplementedError):
-            dt.redistribute(device_mesh, [InterleavedShard(dim=0, interleaved_size=interleaved_size)])
+        dt4 = dt.redistribute(device_mesh, [InterleavedShard(dim=0, interleaved_size=interleaved_size)])
+        self.assertEqual(split_tensor_list[self.rank].reshape(-1, 3), dt4._local_tensor)
 
 
 class InterleavedShardViewLikeOperatorTest(DTensorTestBase):

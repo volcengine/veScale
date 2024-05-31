@@ -97,6 +97,8 @@ DDP_grads_in_fp32 = True
 save_checkpoint_path = "./nanogpt_checkpoint_dir"
 load_checkpoint_path = ""
 use_dist_dropout = True
+async_checkpoint = False
+broadcast_checkpoint = False
 config = {}
 
 
@@ -349,7 +351,7 @@ def main():
     # + + + VeScale Load checkpoint
     if load_checkpoint_path:
         checkpoint_state = {"model": model, "optimizer": optimizer}
-        vescale.checkpoint.load(load_checkpoint_path, checkpoint_state)
+        vescale.checkpoint.load(load_checkpoint_path, checkpoint_state, broadcast_checkpoint=broadcast_checkpoint)
     # + + + VeScale API above
     # training loop
     X, Y = get_batch("train")  # fetch the very first batch
@@ -384,7 +386,11 @@ def main():
                 # Don't save checkpoint
                 # + + + VeScale API below
                 checkpoint_state = {"model": model, "optimizer": optimizer}
-                vescale.checkpoint.save(os.path.join(save_checkpoint_path, f"iter_{iter_num}"), checkpoint_state)
+                vescale.checkpoint.save(
+                    os.path.join(save_checkpoint_path, f"iter_{iter_num}"),
+                    checkpoint_state,
+                    async_checkpoint=async_checkpoint,
+                )
                 # + + + VeScale API above
         if iter_num == 0 and eval_only:
             break

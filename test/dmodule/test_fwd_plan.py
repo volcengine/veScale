@@ -805,5 +805,44 @@ class FwdPlanTestWMixedArgs2(FwdPlanTestBase):
         self.assert_helper(out, expected_t)
 
 
+class FwdPlanTestWNestedDictArgs(FwdPlanTestBase):
+    class DefaultNestedDictArgs(nn.Module):
+        def forward(self, a: dict = None, b: torch.Tensor = None, *args):
+            return a["_a"], a["_b"], b
+
+    model = DefaultNestedDictArgs
+
+    def _test_nested_dict_fwd_plan(self):
+        fwd_plan = {".input": {"a": {"_a": [Shard(0)], "_b": [Shard(1)]}}}
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
+        _a, _b, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2, torch.ones((2, 2)) * 3
+        expected_t = [Shard(0), Shard(1), torch.Tensor]
+
+        out = dmodule(a={"_a": _a, "_b": _b}, b=b)
+        self.assert_helper(out, expected_t)
+
+
+class FwdPlanTestWNestedListArgs(FwdPlanTestBase):
+    class DefaultNestedListArgs(nn.Module):
+        def forward(self, a: list, b: torch.Tensor = None, *args):
+            return a[0], a[1], a[2], b
+
+    model = DefaultNestedListArgs
+
+    def _test_nested_list_fwd_plan(self):
+        fwd_plan = {
+            ".input": {
+                "a": [[Shard(0)], None, None],
+                "b": [Replicate()],
+            }
+        }
+        dmodule = parallelize_module(self.model(), self.device_mesh, {"parameter": {}, "forward": fwd_plan})
+        a0, a1, a2, b = torch.ones((2, 2)), torch.ones((2, 2)) * 2, 1, torch.ones((2, 2)) * 3
+        expected_t = [Shard(0), torch.Tensor, int, Replicate()]
+
+        out = dmodule(a=[a0, a1, a2], b=b)
+        self.assert_helper(out, expected_t)
+
+
 if __name__ == "__main__":
     run_tests()
