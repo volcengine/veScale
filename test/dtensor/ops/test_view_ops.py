@@ -45,6 +45,49 @@ class TestViewOps(DTensorTestBase):
             ),
         )
         self.assertEqual(
+            view_groups([2, 0], [0, 2]),
+            (
+                Split(Flatten((InputDim(0), InputDim(1))), (0, 2), 0),
+                Split(Flatten((InputDim(0), InputDim(1))), (0, 2), 1),
+            ),
+        )
+        self.assertEqual(
+            view_groups([1, 0, 0, 1], [0, 1, 3]),
+            (
+                Split(Flatten((InputDim(1), InputDim(2))), (0, 3), 0),
+                Singleton(),
+                Split(Flatten((InputDim(1), InputDim(2))), (0, 3), 1),
+            ),
+        )
+        self.assertEqual(
+            view_groups([1, 0, 2, 3], [0, 1, 0, 10]),
+            (
+                Split(Flatten((InputDim(1), InputDim(2), InputDim(3))), (0, 0, 10), 0),
+                Singleton(),
+                Split(Flatten((InputDim(1), InputDim(2), InputDim(3))), (0, 0, 10), 1),
+                Split(Flatten((InputDim(1), InputDim(2), InputDim(3))), (0, 0, 10), 2),
+            ),
+        )
+        self.assertEqual(
+            view_groups([0, 9, 1], [1, -1]),
+            (
+                Singleton(),
+                Flatten((InputDim(0), InputDim(1))),
+            ),
+        )
+        self.assertEqual(
+            view_groups([1, 0], [0, 0, 1, 3, 1, 0, 10]),
+            (
+                Split(InputDim(1), (0, 0, 3, 0, 10), 0),
+                Split(InputDim(1), (0, 0, 3, 0, 10), 1),
+                Singleton(),
+                Split(InputDim(1), (0, 0, 3, 0, 10), 2),
+                Singleton(),
+                Split(InputDim(1), (0, 0, 3, 0, 10), 3),
+                Split(InputDim(1), (0, 0, 3, 0, 10), 4),
+            ),
+        )
+        self.assertEqual(
             view_groups([3, 4, 5], [12, 5]),
             (Flatten((InputDim(0), InputDim(1))), InputDim(2)),
         )
@@ -380,6 +423,17 @@ class TestViewOps(DTensorTestBase):
         )
 
         self.dimmap_test(
+            torch.reshape,
+            (randn(8, 12, 0), (8, 12, 1, 0)),
+            (
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (8, 12, 0), 0),
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (8, 12, 0), 1),
+                Singleton(),
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (8, 12, 0), 2),
+            ),
+        )
+
+        self.dimmap_test(
             torch.tile,
             (randn(24, 36), (1, 2, 1, 1, 2)),
             (
@@ -417,6 +471,17 @@ class TestViewOps(DTensorTestBase):
             Tensor.view,
             (randn(8, 12, 24), 96, 24),
             (Flatten((InputDim(0), InputDim(1))), InputDim(2)),
+        )
+
+        self.dimmap_test(
+            Tensor.view,
+            (randn(8, 12, 0), (8, 12, 1, 0)),
+            (
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (8, 12, 0), 0),
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (8, 12, 0), 1),
+                Singleton(),
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (8, 12, 0), 2),
+            ),
         )
 
         self.dimmap_test(Tensor.view, (randn(1, 1, 12), -1), (InputDim(2),))

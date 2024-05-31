@@ -8,3 +8,4 @@ optree
 accelerate
 transformers==4.37.2
 flash_attn
+mmh3

@@ -114,9 +114,11 @@ try:
     if is_flash_attn_2_available():
         import flash_attn
         from flash_attn import flash_attn_func, flash_attn_varlen_func
+        from torch.nn.functional import scaled_dot_product_attention
 
         flash_attn_func_ = flash_attn_func
         flash_attn_varlen_func_ = flash_attn_varlen_func
+        scaled_dot_product_attention_ = scaled_dot_product_attention
 
         def flash_attn_func_wrap(*args, **kwargs):
             q, k, v = args[0], args[1], args[2]
@@ -126,7 +128,7 @@ try:
             else:
                 q_placements = q.placements if isinstance(q, DTensor) else None
                 mesh = q.device_mesh if isinstance(q, DTensor) else None
-                result = flash_attn_func_(q.to_local(), k.to_local(), v.to_local(), *args[3:], **kwargs)
+                result = flash_attn_func_(q.to_local(), k.to_local(), v.to_local(), *args[3:], **kwargs).contiguous()
                 return DTensor.from_local(result, mesh, q_placements)
 
         def flash_attn_varlen_func_wrap(*args, **kwargs):
@@ -137,10 +139,12 @@ try:
             else:
                 q_placements = q.placements if isinstance(q, DTensor) else None
                 mesh = q.device_mesh if isinstance(q, DTensor) else None
-                result = flash_attn_varlen_func_(q.to_local(), k.to_local(), v.to_local(), *args[3:], **kwargs)
+                result = flash_attn_varlen_func_(
+                    q.to_local(), k.to_local(), v.to_local(), *args[3:], **kwargs
+                ).contiguous()
                 return DTensor.from_local(result, mesh, q_placements)
 
         flash_attn.flash_attn_func = flash_attn_func_wrap
         flash_attn.flash_attn_varlen_func = flash_attn_varlen_func_wrap
-except:
+except ImportError:
     warnings.warn("Failed to monkey patch flash attn 2, running flash attn 2 under dtensor might lead to error")

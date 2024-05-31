@@ -1,72 +1,72 @@
 // Run
 //
 // python -m grpc_tools.protoc -I.  --python_out=. --pyi_out=. \
-// --grpc_python_out=. ./omnistore/utilities/server/mem_file_service.proto
+// --grpc_python_out=. ./checkpoint/utilities/server/mem_file_service.proto
 //
 // to generate new protos.
 
 syntax = "proto3";
 
-message OmniStoreWriteRequest {
+message VeScaleCheckpointWriteRequest {
   bytes content = 1;
 
   string name = 8;
 }
 
-message OmniStoreWriteResponse {
+message VeScaleCheckpointWriteResponse {
 }
 
-message OmniStoreReadRequest {
+message VeScaleCheckpointReadRequest {
   string name = 1;
 }
 
-message OmniStoreReadResponse {
+message VeScaleCheckpointReadResponse {
   bytes content = 1;
 }
 
-message OmniStoreRenameRequest {
+message VeScaleCheckpointRenameRequest {
   string src = 1;
   string dst = 2;
   bool overwrite = 3;
 }
 
-message OmniStoreRenameResponse {
+message VeScaleCheckpointRenameResponse {
 }
 
-message OmniStoreRemoveRequest {
+message VeScaleCheckpointRemoveRequest {
   string name = 1;
 }
 
-message OmniStoreRemoveResponse {
+message VeScaleCheckpointRemoveResponse {
 }
 
-message OmniStoreListdirRequest {
+message VeScaleCheckpointListdirRequest {
   string name = 1;
 }
 
-message OmniStoreListdirResponse {
+message VeScaleCheckpointListdirResponse {
   repeated string names = 1;
 }
 
-message OmniStoreExistsRequest {
+message VeScaleCheckpointExistsRequest {
   string name = 1;
 }
 
-message OmniStoreExistsResponse {
+message VeScaleCheckpointExistsResponse {
   bool exists = 1;
 }
 
-service OmniStoreMemFileService {
-  rpc Write(stream OmniStoreWriteRequest) returns (OmniStoreWriteResponse) {
+service VeScaleCheckpointMemFileService {
+  rpc Write(stream VeScaleCheckpointWriteRequest) returns (VeScaleCheckpointWriteResponse) {
   }
-  rpc Read(OmniStoreReadRequest) returns (stream OmniStoreReadResponse) {
+  rpc Read(VeScaleCheckpointReadRequest) returns (stream VeScaleCheckpointReadResponse) {
   }
-  rpc Rename(OmniStoreRenameRequest) returns (OmniStoreRenameResponse) {
+  rpc Rename(VeScaleCheckpointRenameRequest) returns (VeScaleCheckpointRenameResponse) {
   }
-  rpc Remove(OmniStoreRemoveRequest) returns (OmniStoreRemoveResponse) {
+  rpc Remove(VeScaleCheckpointRemoveRequest) returns (VeScaleCheckpointRemoveResponse) {
   }
-  rpc Listdir(OmniStoreListdirRequest) returns (OmniStoreListdirResponse) {
+  rpc Listdir(VeScaleCheckpointListdirRequest) returns (VeScaleCheckpointListdirResponse) {
   }
-  rpc Exists(OmniStoreExistsRequest) returns (OmniStoreExistsResponse) {
+  rpc Exists(VeScaleCheckpointExistsRequest) returns (VeScaleCheckpointExistsResponse) {
   }
 }

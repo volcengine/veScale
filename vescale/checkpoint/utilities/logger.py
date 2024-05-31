@@ -226,11 +226,11 @@ def _add_logging_level(level_name, level_num, method_name=None):
     setattr(logging, method_name, log_to_root)
 
 
-class OmniStoreLogger:
+class VeScaleCheckpointLogger:
     def __new__(cls):
         if not hasattr(cls, "instance"):
             level = logging.WARNING
-            level_str = os.environ.get("OMNISTORE_LOGGING_LEVEL", "WARNING").upper()
+            level_str = os.environ.get("VESCALE_CHECKPOINT_LOGGING_LEVEL", "WARNING").upper()
             if level_str in logging._nameToLevel:
                 level = logging._nameToLevel[level_str]
             formatter = logging.Formatter(
@@ -239,13 +239,13 @@ class OmniStoreLogger:
             )
             handler = logging.StreamHandler(stream=sys.stdout)
             handler.setFormatter(formatter)
-            cls.instance = logging.getLogger("omnistore")
+            cls.instance = logging.getLogger("vescale_checkpoint")
             cls.instance.addHandler(handler)
             cls.instance.setLevel(level)
             cls.instance.propagate = False
         return cls.instance
 
 
-def get_omnistore_logger():
-    """Get omnistore logger with logging level OMNISTORE_LOGGING_LEVEL, and output to stdout."""
-    return OmniStoreLogger()
+def get_vescale_checkpoint_logger():
+    """Get vescale.checkpoint logger with logging level VESCALE_CHECKPOINT_LOGGING_LEVEL, and output to stdout."""
+    return VeScaleCheckpointLogger()

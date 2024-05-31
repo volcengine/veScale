@@ -16,7 +16,6 @@
 ################################################################################
 
 import os
-import re
 
 
 def parse_train_loss(log_fn, name=None):
@@ -57,7 +56,7 @@ TRAIN_BIN_PATH = "data/shakespeare/train.bin"
 
 def run_exps(max_iters, dtypes, run=True):
     if not os.path.isfile(TRAIN_BIN_PATH):
-        os.system(f"cd data/shakespeare/ && python3 prepare.py && cd ../..")
+        os.system("cd data/shakespeare/ && python3 prepare.py && cd ../..")
     os.makedirs("logs", exist_ok=True)
     if run:
         for dtype in dtypes:

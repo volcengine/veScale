@@ -8,18 +8,17 @@
 # Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
+import functools
+import operator
+
 from typing import Dict, Tuple, cast
 
 import torch
+import torch.distributed as dist
 
-from vescale.dtensor.op_schema import (
-    DTensorSpec,
-    OpInfo,
-    OutputSharding,
-)
-from vescale.dtensor.placement_types import TensorMeta
+import vescale
 
-__all__ = ["_bypass_for_dispatch", "_bypass_for_sharding_prop"]
+__all__ = ["_bypass_for_dispatch"]
 
 aten = torch.ops.aten
 
@@ -31,9 +30,15 @@ class BypassOpDispatch:
 
     def __init__(self):
         self.op_handlers = {
+            # origin bypass op dispatch func
             aten.linear.default: BypassOpDispatch.decompose_handler,
             aten.is_same_size.default: BypassOpDispatch.is_same_size_handler,
+            # from bypass op sharding prop
             aten.nonzero.default: BypassOpDispatch.nonzero_handler,
+            aten._to_copy.default: BypassOpDispatch.copy_handler,
+            aten._local_scalar_dense.default: BypassOpDispatch.scalar_handler,
+            aten.equal.default: BypassOpDispatch.equal_handler,
+            # other ?
         }
 
     def apply(
@@ -42,9 +47,9 @@ class BypassOpDispatch:
         args: Tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> Tuple[bool, object]:
-        is_bypass = op_call in self.op_handlers
-        if is_bypass:
-            return True, self.op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
+        bypass_call = self.op_handlers.get(op_call, None)
+        if bypass_call is not None:
+            return True, bypass_call(op_call, args, kwargs)  # type: ignore[operator]
         else:
             return False, None
 
@@ -80,16 +85,14 @@ class BypassOpDispatch:
         args: Tuple[object, ...],
         kwargs: Dict[str, object],
     ) -> object:
-        from vescale.dtensor import DTensor
-
         input_ = kwargs.get("input", args[0])
-        assert isinstance(input_, DTensor)
+        assert isinstance(input_, vescale.dtensor.DTensor)
         input_spec = input_._spec
         all_replicate = all(p.is_replicate() for p in input_spec.placements)
         assert all_replicate, "input placement has to be replicate"
         input_local = input_._local_tensor
         output_local = op_call(input_local)
-        return DTensor(
+        return vescale.dtensor.DTensor(
             local_tensor=output_local,
             device_mesh=input_spec.mesh,
             placements=input_spec.placements,
@@ -98,6 +101,58 @@ class BypassOpDispatch:
             requires_grad=output_local.requires_grad,
             stride=output_local.stride(),
         )
+
+    @staticmethod
+    def copy_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ) -> object:
+        input_dtensor = args[0]
+        input_local = input_dtensor._local_tensor
+        output_local = op_call(*(input_local, *(args[1:])), **kwargs)
+        return vescale.dtensor.DTensor(
+            local_tensor=output_local,
+            device_mesh=input_dtensor.device_mesh,
+            placements=input_dtensor.placements,
+            shape=input_dtensor.shape,
+            dtype=output_local.dtype,
+            requires_grad=output_local.requires_grad,
+            stride=input_dtensor.stride(),
+        )
+
+    @staticmethod
+    def scalar_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ) -> object:
+        input_dtensor = args[0]
+        input_local = input_dtensor._local_tensor
+        return op_call(*(input_local, *(args[1:])), **kwargs)
+
+    @staticmethod
+    def equal_handler(
+        op_call: torch._ops.OpOverload,
+        args: Tuple[object, ...],
+        kwargs: Dict[str, object],
+    ) -> object:
+        dtensor0 = args[0]
+        dtensor1 = args[1]
+        local0 = dtensor0._local_tensor
+        local1 = dtensor1._local_tensor
+        local_results = op_call(local0, local1, *(args[2:]), **kwargs)
+        if dtensor0._spec.is_replicated() and dtensor1._spec.is_replicated():
+            return local_results
+
+        obj_list = [None] * dist.get_world_size()
+        dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
+        obj_list = [e for e in obj_list if e is not None]
+        # perform reduce on the collection with AND op
+        # :NOTE: here is an implicit communication
+        local_results = functools.reduce(operator.and_, obj_list, True)
+
+        return local_results
 
 
 _bypass_op_dispatch = BypassOpDispatch()
@@ -112,57 +167,3 @@ def _bypass_for_dispatch(
     Put bypass logic here before entering dtensor dispatching logic
     """
     return _bypass_op_dispatch.apply(op_call, args, kwargs)
-
-
-class BypassOpShardingProp:
-    """
-    Register custom op handler to bypass sharding propagation here
-    """
-
-    def __init__(self):
-        self.op_handlers = {
-            aten._to_copy.default: BypassOpShardingProp.copy_handler,
-            aten._local_scalar_dense.default: BypassOpShardingProp.scalar_handler,
-            aten.equal.default: BypassOpShardingProp.scalar_handler,
-        }
-
-    def apply(self, op_info: OpInfo) -> bool:
-        is_bypass = op_info.schema.op in self.op_handlers
-        if is_bypass:
-            op_info.output_sharding = self.op_handlers[op_info.schema.op](op_info)
-            return True
-        else:
-            return False
-
-    @staticmethod
-    def copy_handler(op_info: OpInfo) -> OutputSharding:
-        op_schema = op_info.schema
-        kwargs = op_schema.gen_fake_kwargs()
-        dtype = kwargs["dtype"]
-        args_spec0 = op_schema.args_spec[0]
-        out_tensor_meta = TensorMeta(
-            shape=args_spec0.tensor_meta.shape,
-            stride=args_spec0.tensor_meta.stride,
-            dtype=dtype,
-        )
-        return OutputSharding(
-            output_spec=DTensorSpec(
-                mesh=args_spec0.mesh,
-                placements=args_spec0.placements,
-                tensor_meta=out_tensor_meta,
-            )
-        )
-
-    @staticmethod
-    def scalar_handler(op_info: OpInfo) -> OutputSharding:
-        return OutputSharding(None, [op_info.schema])
-
-
-_bypass_op_sharding_prop = BypassOpShardingProp()
-
-
-def _bypass_for_sharding_prop(op_info: OpInfo) -> bool:
-    """
-    Put bypass logic here before entering dtensor sharding propagation logic
-    """
-    return _bypass_op_sharding_prop.apply(op_info)

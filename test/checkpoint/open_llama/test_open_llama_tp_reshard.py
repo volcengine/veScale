@@ -55,6 +55,8 @@ class OpenLLaMa2Test1(DTensorTestBase):
 
         ckpt_state = {"model": ddp_decoder, "optimizer": ve_optimizer}
         vescale.checkpoint.save(TMP_CKPT_DIR, ckpt_state)
+        # Clean up writing futures (For unit test only)
+        vescale.checkpoint.VeScaleCheckpointer._VeScaleCheckpointer__cleanup()
 
         # Merge model state dictionary and save it
         # full_tensor contains gather operations

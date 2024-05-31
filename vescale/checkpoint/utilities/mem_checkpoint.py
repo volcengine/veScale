@@ -24,9 +24,9 @@ from typing import Callable, Dict, Any, DefaultDict, List, Optional
 import pickle
 
 from . import bfile
-from .logger import get_omnistore_logger
+from .logger import get_vescale_checkpoint_logger
 
-logger = get_omnistore_logger()
+logger = get_vescale_checkpoint_logger()
 
 if hasattr(torch.storage, "TypedStorage"):
     TypedStorage = torch.storage.TypedStorage
@@ -84,11 +84,71 @@ class PinnedStoragePool:
             return s.pop()
 
     def deallocate(self, s):
+        # WARNING: Call deallocate when the reference to CPU tensor goes to zero
+        # so the memory pool will reuse the memory if possbile
+        # Othterwise, the memory pool will allocate memory on the used memory range,
+        # leading to cuda error 712 cudaErrorHostMemoryAlreadyRegistered
         with self._l:
             self._m[s.nbytes()].add(s)
 
 
 GLOBAL_POOL = PinnedStoragePool()
+
+TID = threading.get_ident()
+
+
+def copy_gpu_tensor_to_cpu_pinned_mem_pool(tensor: torch.Tensor, non_blocking=False) -> torch.Tensor:
+    """
+    Copy a tensor on GPU to pinned memory pool (host CPU memory).
+    The input tensor will not be modified
+    Args:
+        tensor: a tensor on cuda device
+    Return:
+        a tensor on cpu, whose data is the same as input tensor
+    """
+    m = {}
+    _old_warning = getattr(torch.storage, "_warn_typed_storage_removal", None)
+    torch.storage._warn_typed_storage_removal = lambda *args, **kwags: None
+
+    def persistent_id(o):
+        if torch.is_storage(o) or isinstance(o, TypedStorage):
+            storage = o
+            if storage._cdata in m:
+                return storage._cdata
+            if storage.device.type != "cpu":
+                copied = GLOBAL_POOL.allocate(storage.nbytes())
+                copied.copy_(storage, non_blocking=non_blocking)
+                if isinstance(storage, TypedStorage):
+                    copied = storage._new_wrapped_storage(copied)
+            else:
+                copied = storage.clone()
+            m[storage._cdata] = copied
+            return storage._cdata
+        return
+
+    b = io.BytesIO()
+    p = pickle.Pickler(b)
+    p.persistent_id = persistent_id
+    p.dump(tensor)
+    b.seek(0)
+    up = pickle.Unpickler(b)
+    up.persistent_load = lambda i: m[i]
+    cpu_tensor = up.load()
+    """
+    assert type(tensor) == torch.Tensor
+    storage_obj = tensor.storage()
+    cpu_storage = GLOBAL_POOL.allocate(storage_obj.nbytes())
+
+    cpu_storage.copy_(storage_obj, non_blocking=non_blocking)
+    cpu_tensor = torch.tensor(cpu_storage)
+    """
+    torch.storage._warn_typed_storage_removal = _old_warning
+    return cpu_tensor
+
+
+def deallocate_cpu_tensor_in_pinned_mem_pool(tensor: torch.Tensor):
+    "Deallocate CPU tensor in the global pinned memory pool"
+    GLOBAL_POOL.deallocate(tensor.untyped_storage())
 
 
 class _CalledOnce:

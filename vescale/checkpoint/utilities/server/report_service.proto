@@ -1,13 +1,13 @@
 // Run
 //
 // python -m grpc_tools.protoc -I.  --python_out=. --pyi_out=. \
-// --grpc_python_out=. ./omnistore/utilities/server/report_service.proto
+// --grpc_python_out=. ./checkpoint/utilities/server/report_service.proto
 //
 // to generate new protos.
 
 syntax = "proto3";
 
-message OmniStoreGatherRequest {
+message VeScaleCheckpointGatherRequest {
   // Used to distinguish different tasks.
   string tag = 1;
   int32 rank = 2;
@@ -15,35 +15,35 @@ message OmniStoreGatherRequest {
   bool with_result = 4;
 }
 
-message OmniStoreGatherResponse {
+message VeScaleCheckpointGatherResponse {
   repeated bytes contents = 1;
 }
 
-message OmniStoreBroadcastRequest {
+message VeScaleCheckpointBroadcastRequest {
   string tag = 1;
   int32 rank = 2;
   bytes content = 3;
   int32 src_rank = 4;
 }
 
-message OmniStoreBroadcastResponse {
+message VeScaleCheckpointBroadcastResponse {
   bytes content = 1;
 }
 
-message OmniStoreGetStatusRequest {
+message VeScaleCheckpointGetStatusRequest {
 }
 
-message OmniStoreGetStatusResponse {
+message VeScaleCheckpointGetStatusResponse {
   bytes status = 1;
 }
 
-service OmniStoreReportService {
-  rpc Gather(OmniStoreGatherRequest) returns (OmniStoreGatherResponse) {
+service VeScaleCheckpointReportService {
+  rpc Gather(VeScaleCheckpointGatherRequest) returns (VeScaleCheckpointGatherResponse) {
   }
 
-  rpc Broadcast(OmniStoreBroadcastRequest) returns (OmniStoreBroadcastResponse) {
+  rpc Broadcast(VeScaleCheckpointBroadcastRequest) returns (VeScaleCheckpointBroadcastResponse) {
   }
 
-  rpc GetStatus(OmniStoreGetStatusRequest) returns (OmniStoreGetStatusResponse) {
+  rpc GetStatus(VeScaleCheckpointGetStatusRequest) returns (VeScaleCheckpointGetStatusResponse) {
   }
 }

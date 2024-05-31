@@ -26,6 +26,7 @@ from vescale.dtensor._collective_utils import (
 from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.op_schema import DTensorSpec
 from vescale.dtensor.placement_types import InterleavedShard, Partial, Placement, Replicate, Shard
+from vescale.dtensor._utils import compute_global_stride
 
 _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
 
@@ -74,7 +75,8 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
         if (
             isinstance(current, Shard)
             and isinstance(target, Shard)
-            and (current.dim != target.dim or repeat_dim_current[current.dim] != repeat_dim_target[target.dim])
+            and (isinstance(target, InterleavedShard) or isinstance(current, InterleavedShard))
+            # and (current.dim != target.dim or repeat_dim_current[current.dim] != repeat_dim_target[target.dim])
         ):
             # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
             output.append((i, (current, Replicate())))
@@ -244,6 +246,7 @@ def redistribute_local_tensor(
     current_placements = current_spec.placements
     target_placements = target_spec.placements
     sorted_placements = list(enumerate(zip(current_placements, target_placements)))
+    sorted_placements = _decompose_reshard(sorted_placements)
     sorted_placements.sort(key=_replicate_then_shard)
 
     for i, (current, target) in sorted_placements:
@@ -328,7 +331,7 @@ def redistribute_local_tensor(
                 # FIXME: for now, we don't support conversion
                 # between InterleavedShard and Shard. Maybe we should provide
                 # a method to transfer InterleavedShard to a contiguous Shard?
-                raise NotImplementedError("Redistributiom from Shard to InterleavedShard is not supported")
+                raise NotImplementedError("Redistribution from Shard to InterleavedShard is not supported")
         elif target.is_shard():
             # Case 2: target is Shard
             target_placement = cast(Shard, target)
@@ -527,17 +530,29 @@ class Redistribute(torch.autograd.Function):
         # Short cut the local tensor if the placements are the same.
         if current_spec == target_spec:
             output = local_tensor
+            output_dtensor = dtensor.DTensor(
+                output,
+                target_spec.mesh,
+                target_spec.placements,
+                shape=grad_output.shape,
+                dtype=grad_output.dtype,
+                requires_grad=grad_output.requires_grad,
+                stride=grad_output.stride(),
+            )
         else:
             output = redistribute_local_tensor(local_tensor, current_spec, target_spec, async_op)
-
-        output_dtensor = dtensor.DTensor(
-            output,
-            target_spec.mesh,
-            target_spec.placements,
-            shape=grad_output.shape,
-            dtype=grad_output.dtype,
-            requires_grad=grad_output.requires_grad,
-            stride=grad_output.stride(),
-        )
+            output_dtensor = dtensor.DTensor(
+                output,
+                target_spec.mesh,
+                target_spec.placements,
+                shape=grad_output.shape,
+                dtype=grad_output.dtype,
+                requires_grad=grad_output.requires_grad,
+                stride=compute_global_stride(output, mesh=target_spec.mesh, placements=target_spec.placements)
+                # we found in some cases, after redistribute tensor, global stride will differ from the local
+                # stride, we forcely the global stride to match the local stride when local tensor is contiguous.
+                if output.is_contiguous()
+                else grad_output.stride(),
+            )
 
         return (output_dtensor, None, None, None)

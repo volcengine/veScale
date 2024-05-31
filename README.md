@@ -18,12 +18,19 @@ _**An Industrial-Level Framework for Easy-of-Use**_
 
 - 📀 **Automatic Checkpoint Resharding**: veScale manages distributed checkpoints automatically with online resharding across different cluster sizes and different parallelism strategies. 
 
+## Latest News
+
+- [2024-5-31] veScale's [fast checkpointing system](https://github.com/volcengine/veScale/blob/main/vescale/checkpoint/README.md) open sourced with automatic checkpoint resharding, caching, load-balancing, fast copying, deduplicating, and asynchronous io.
+
+- [2024-5-21] veScale's examples ([Mixtral](https://github.com/volcengine/veScale/tree/main/examples/mixtral_4D_training), [LLama2](https://github.com/volcengine/veScale/tree/main/examples/llama2_4D_finetune), and [nanoGPT](https://github.com/volcengine/veScale/tree/main/examples/nanogpt_4D_finetune)) open sourced with bit-wise correctness of training loss curves.
+
+- [2024-5-13] The debut of veScale in MLSys 2024 as a [poster](https://volcengine.github.io/veScaleWeb/blog/mlsys2024.html).
+
+- [2024-4-16] Our [internal LLM training system](https://volcengine.github.io/veScaleWeb/blog/megascale.html) presented in NSDI 2024.
 
 ## Coming Soon
 
-_**veScale**_ is still in its early phase. We are refactoring our [internal LLM training system](https://arxiv.org/abs/2402.15627) components to meet open source standard. The tentative timeline is as follows:
-
-- by end of May, fast checkpointing system
+_**veScale**_ is still in its early phase. We are refactoring our internal LLM training system components to meet open source standard. The tentative timeline is as follows:
 
 - by end of July, CUDA event monitor, pipeline parallelism and supporting components for large-scale training
 

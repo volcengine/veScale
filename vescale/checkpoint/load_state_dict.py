@@ -9,18 +9,17 @@
 ################################################################################
 
 from typing import Optional
-
-import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.planner import LoadPlanner
 from torch.distributed.checkpoint.utils import _DistWrapper
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
-from torch.distributed.checkpoint.filesystem import FileSystemReader
+from .storage.filesystem import FileSystemReader
 from .api.meta_type import STATE_DICT_TYPE
 import time
-from .utilities.logger import get_omnistore_logger
+from .utilities.logger import get_vescale_checkpoint_logger
+from vescale.checkpoint.planner.vescale.vescale_planner import VeScaleLoadPlanner
 
-logger = get_omnistore_logger()
+logger = get_vescale_checkpoint_logger()
 
 META_DATA_FILE = ".metadata"
 
@@ -32,15 +31,18 @@ def load_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[LoadPlanner] = None,
+    broadcast_tensors=False,
 ) -> None:
     load_start_time = time.time()
     """
     [veScale version] Loads a distributed ``state_dict`` in SPMD style. Fix sub-group storage.
     """
+    storage_reader = FileSystemReader(
+        path,
+        broadcast_tensors=broadcast_tensors,
+        data_parallel_process_group=process_group,
+    )
 
-    storage_reader = FileSystemReader(path)
-
-    torch._C._log_api_usage_once("omnistore.checkpoint.vescale_checkpoint.load_state_dict")
     # Step 0: create distributed world based on process group and coordinator rank
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if process_group:
@@ -70,13 +72,16 @@ def load_state_dict(
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan = distW.reduce_scatter("plan", local_step, global_step)
+    if isinstance(planner, VeScaleLoadPlanner):
+        central_plan = distW.reduce_scatter("plan", local_step, global_step)
+    else:
+        raise AssertionError("Unsupported planner for saving checkpoint")
     load_ckpt_plan_cost_time = time.time() - plan_start_time
     logger.info(f"Finish planning. Cost time: {load_ckpt_plan_cost_time}s")
 
     read_start_time = time.time()
 
-    # Step 2: all processes read data from path
+    # Step 2: all processes read data from the given path
     def read_data():
         assert planner is not None
         final_local_plan = planner.finish_plan(central_plan)

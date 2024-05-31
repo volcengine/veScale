@@ -419,8 +419,13 @@ def prop_as_strided_rule(op_schema: OpSchema) -> OutputSharding:
     memory_offset = args_schema[3]
 
     assert isinstance(input_spec, DTensorSpec)
-    assert memory_offset == 0, "for now, we only support 0 offset"
+    mesh = input_spec.mesh
 
+    # NOTE: this is a hack for a simple case.
+    if not output_shape or input_spec.is_replicated():
+        return OutputSharding(DTensorSpec(mesh=mesh, placements=tuple([Replicate()] * mesh.ndim)))
+
+    assert memory_offset == 0, "for now, we only support 0 offset"
     assert _check_tensor_contiguous(output_shape, output_stride), "for now, we only support contiguous output"
 
     assert input_spec.tensor_meta is not None

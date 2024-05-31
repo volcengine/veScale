@@ -79,9 +79,25 @@ class PreHookInput:
         return _convert_by_pi(x, pi, device_mesh, raise_err=False)
 
     @staticmethod
+    def _convert_dictlike(input_dict: Dict[str, Any], pi_dict: DictFwdPIs, device_mesh: DeviceMesh):
+        assert isinstance(pi_dict, Dict), f"{type(input_dict)}"
+        new_output = {}
+        for key in input_dict:
+            if key in pi_dict:
+                new_output[key] = PreHookInput._convert(input_dict[key], pi_dict[key], device_mesh)
+            else:
+                new_output[key] = input_dict[key]
+        return type(input_dict)(**new_output)
+
+    @staticmethod
+    def _convert_listlike(input_list: Dict[str, Any], pi_list: DictFwdPIs, device_mesh: DeviceMesh):
+        return [_convert_by_pi(x, pi, device_mesh, raise_err=False) for x, pi in zip(input_list, pi_list)]
+
+    @staticmethod
     def _hook(module: nn.Module, args: Any, kwargs: Any, device_mesh: DeviceMesh, input_pis: FwdPIs):
         convert = lambda x, pi: PreHookInput._convert(x, pi, device_mesh)
         convert_dictlike = lambda x_dict, pi_dict: PreHookInput._convert_dictlike(x_dict, pi_dict, device_mesh)
+        convert_listlike = lambda x_list, pi_list: PreHookInput._convert_listlike(x_list, pi_list, device_mesh)
         func_sig = get_sig(module)
         bound_args = func_sig.bind(*args, **kwargs)
         bound_args.apply_defaults()
@@ -138,7 +154,12 @@ class PreHookInput:
                     bound_args.arguments["args"] = new_var_pos
                     continue
                 pi = input_pis[k]
-                bound_args.arguments[k] = convert(v, pi)
+                if isinstance(pi, Dict):
+                    bound_args.arguments[k] = convert_dictlike(v, pi)
+                elif (isinstance(pi, (list, tuple))) and not isinstance(pi[0], Placement):
+                    bound_args.arguments[k] = convert_listlike(v, pi)
+                else:
+                    bound_args.arguments[k] = convert(v, pi)
             if var_keyward_name is None:
                 return bound_args.args, bound_args.kwargs
             for k, v in bound_args.arguments[var_keyward_name].items():

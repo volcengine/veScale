@@ -498,6 +498,38 @@ class DeviceMesh:
     def get_rank(self) -> int:
         return get_rank()
 
+    def get_local_rank(self, mesh_dim: Optional[int] = None) -> int:
+        """
+        Returns the local rank of the given mesh_dim of the DeviceMesh.
+
+        Args:
+            mesh_dim (int, optional): it is the index of the mesh dimension. Default is None.
+
+        Returns:
+            An integer denotes the local rank.
+
+        The following program runs on each process/rank in an SPMD manner. In this example, we have 2
+        hosts with 4 GPUs each.
+        Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
+        Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 4, 5, 6, 7 would return 1.
+        Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 0, 4 would return 0.
+        Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 1, 5 would return 1.
+        Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 2, 6 would return 2.
+        Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
+        """
+        if self.ndim > 1 and mesh_dim is None:
+            raise RuntimeError(
+                f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+            )
+        elif mesh_dim is None:
+            mesh_dim = 0
+
+        mesh_dim_group = self.get_dim_groups(mesh_dim)
+        assert isinstance(mesh_dim_group, ProcessGroup), "We expect ProcessGroup before calling `get_rank`!"
+
+        return get_rank(mesh_dim_group)
+
     def get_coordinate(self) -> Optional[List[int]]:
         """
         Return the relative indices of this rank relative to all
