@@ -21,7 +21,7 @@ import torch.nn as nn
 from torch.testing._internal.common_utils import run_tests
 from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 from vescale.plan import PipelineScheduleType, PipelineParallelPlan, ModeType, PipelineSplitMethodType
-from vescale.pipe.pipe_stage import PipeModule, construct_stage_modules
+from vescale.pipe.pipe_stage import construct_pipeline_stage
 from vescale.engine import PipeEngine
 from common_dtensor import DTensorTestBase, with_comms
 from torch.optim import SGD
@@ -132,9 +132,7 @@ class PipelineSingleStageOpsTest(DTensorTestBase):
     def _run_no_pp_model(self):
         os.environ["model_name"] = "golden"
         model = EightMLP().to("cuda:0")
-        optimizer = torch.optim.SGD(
-            model.parameters(), lr=0.01, momentum=0, dampening=0, weight_decay=0, nesterov=False
-        )
+        optimizer = SGD(model.parameters(), lr=0.01, momentum=0, dampening=0, weight_decay=0, nesterov=False)
         torch.manual_seed(9999)
         batch = [torch.ones(microbatch_size, 128, 32, dtype=torch.float32).to("cuda:0") for _ in range(factor)]
         for mb in batch:
@@ -166,13 +164,6 @@ class PipelineSingleStageOpsTest(DTensorTestBase):
             mesh_dim_names=("PP", "DP", "TP"),
         )
 
-        stage_modules, stage_dependency, p2p_index_mapping = construct_stage_modules(
-            model,
-            config,
-            VESCALE_DEVICE_MESH,
-            update_split_points=True,
-        )
-
         optimizer_fn_kwargs = {
             "lr": 0.01,
             "momentum": 0,
@@ -183,9 +174,16 @@ class PipelineSingleStageOpsTest(DTensorTestBase):
             "foreach": None,
             "differentiable": False,
         }
-        _parameters = list(stage_modules[0].parameters()) + list(stage_modules[1].parameters())
-        optimizer = SGD(_parameters, **optimizer_fn_kwargs)
-        pipe_module = PipeModule(stage_modules, optimizer, None, stage_dependency, p2p_index_mapping, config)
+
+        pipe_module = construct_pipeline_stage(
+            model,
+            config,
+            VESCALE_DEVICE_MESH,
+            lr_scheduler=None,
+            update_split_points=True,
+        )
+        optimizer = SGD(pipe_module.parameters(), **optimizer_fn_kwargs)
+        pipe_module.doptimizer = optimizer
 
         engine = PipeEngine(
             pipe_module,
