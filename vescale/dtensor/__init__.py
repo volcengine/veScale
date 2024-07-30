@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 ################################################################################
-# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 from numbers import Number
@@ -25,7 +25,7 @@ from vescale.dtensor._utils import (
 )
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
 from vescale.dtensor.api import normalize_placements
-from vescale.dtensor.dtensor import DTensor
+from vescale.dtensor.dtensor import DTensor, make_dtensor
 from vescale.dtensor.ops.utils import normalize_to_torch_size
 from vescale.dtensor.placement_types import DTensorSpec, Placement, Replicate, TensorMeta
 

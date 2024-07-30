@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 ################################################################################
-# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 import warnings
@@ -18,6 +18,7 @@ try:
     from torchdistx.deferred_init import deferred_init as _deferred_init
     from torchdistx.deferred_init import is_deferred as _is_deferred
     from torchdistx.deferred_init import _C
+    from torchdistx.deferred_init import materialize_module as _materialize_module
 
     IMPORT_DEFER = True
 except:  # noqa: E722
@@ -79,6 +80,19 @@ def is_deferred(obj: Union[torch.Tensor, nn.Parameter, nn.Module]) -> bool:
             "`is_deferred` takes a `DModule`! deferring a `DModule` itself might be not supported.", UserWarning
         )
     return _is_deferred(obj)
+
+
+def materialize_module(obj: nn.Module):
+    """Materializes deferred initialized ``nn.Module`` object.
+
+    Args:
+        obj:
+            An ``nn.Module`` instance.
+    """
+    if not IMPORT_DEFER:
+        return False
+
+    _materialize_module(obj)
 
 
 def materialize_dtensor(

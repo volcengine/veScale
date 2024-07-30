@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 ################################################################################
-# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 from dataclasses import dataclass
@@ -56,9 +56,9 @@ class Placement:
         elif tensor[0] == 1:
             return Partial()
         elif tensor[0] == 2:
-            return Shard(dim=tensor[1])
+            return Shard(dim=tensor[1].item())
         elif tensor[0] == 3:
-            return InterleavedShard(dim=tensor[1], interleaved_size=tensor[2])
+            return InterleavedShard(dim=tensor[1].item(), interleaved_size=tensor[2].item())
 
 
 class Shard(Placement):

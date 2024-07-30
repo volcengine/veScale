@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright 2023 ByteDance Ltd. and/or its affiliates. All rights reserved.
+# Copyright 2024 ByteDance Ltd. and/or its affiliates. All rights reserved.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -56,7 +56,8 @@ class DecoderTest(DTensorTestBase):
         input.retain_grad()
         non_parallel_decoder, _ = get_model()
         non_parallel_decoder = non_parallel_decoder.cuda()
-        golden_outputs = non_parallel_decoder(input)
+        dummy_position_id = torch.randint(low=0, high=s, size=(bsz, s)).cuda()
+        golden_outputs = non_parallel_decoder(input, position_ids=dummy_position_id)
         golden_loss = golden_outputs[0].mean()
         golden_loss.backward()
 
@@ -95,8 +96,9 @@ class DecoderTest(DTensorTestBase):
         d_input = distribute_tensor(input.detach(), device_mesh, [Shard(1)])
         d_input.requires_grad_()
         d_input.retain_grad()
+        d_position_id = distribute_tensor(dummy_position_id.detach(), device_mesh, [Replicate()])
 
-        vescale_outputs = vescale_decoder(d_input)
+        vescale_outputs = vescale_decoder(d_input, position_ids=d_position_id)
         vescale_outputs[0] = vescale_outputs[0].redistribute(placements=[Replicate()] * device_mesh.ndim)
         vescale_loss = vescale_outputs[0].mean()
 

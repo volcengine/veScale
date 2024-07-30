@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 ################################################################################
-# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 import os
@@ -493,15 +493,15 @@ class DTensor(torch.Tensor):
         grad_placements: Optional[Sequence[Placement]] = None,
         async_output: bool = True,
     ) -> torch.Tensor:
-
         # NOTE: moving impl code here for performance, as here is on the critial path but api function is NEVER used
 
         if grad_placements is not None:
             grad_placements: Tuple[Placement] = normalize_placements(
                 grad_placements, self._spec.mesh.ndim, tensor_ndim=self.ndim
             )
-        
+
         return _ToTorchTensor.apply(self, grad_placements, async_output)
+
     def redistribute(
         self,
         device_mesh: Optional[DeviceMesh] = None,
@@ -539,3 +539,24 @@ class DTensor(torch.Tensor):
         - This operation is not dispatched but a torch function.
         """
         return self._local_tensor.tolist()
+
+
+def make_dtensor(
+    local_tensor: torch.Tensor,
+    device_mesh: DeviceMesh,
+    placements: Tuple[Placement, ...],
+    *,
+    shape: torch.Size,
+    dtype: torch.dtype,
+    requires_grad: bool,
+    stride: Tuple[int, ...],
+):
+    return DTensor(
+        local_tensor,
+        device_mesh,
+        placements,
+        shape=shape,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        stride=stride,
+    )

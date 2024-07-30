@@ -6,6 +6,6 @@ pytest
 tqdm
 optree
 accelerate
-transformers==4.37.2
+transformers==4.40.2
 flash_attn
 mmh3
