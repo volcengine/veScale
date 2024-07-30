@@ -15,4 +15,4 @@
 #
 ################################################################################
 
-from .deferred_init import deferred_init, is_deferred, materialize_dtensor, materialize_dparameter
+from .deferred_init import deferred_init, is_deferred, materialize_dtensor, materialize_dparameter, materialize_module

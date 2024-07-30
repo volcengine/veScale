@@ -101,9 +101,7 @@ class TestNanoGPT2(DTensorTestBase):
     @skip_unless_torch_gpu
     @with_comms
     def test_load(self):
-        ddp_gpt, dist_optimizer, _ = build_gpt_model_optimizer_and_dataset(
-            self.init_method, dp_size=2, tp_size=2
-        )
+        ddp_gpt, dist_optimizer, _ = build_gpt_model_optimizer_and_dataset(self.init_method, dp_size=2, tp_size=2)
 
         # Load the model and optimizer after first data
 

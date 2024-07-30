@@ -15,4 +15,4 @@
 #
 ################################################################################
 
-from .api import VESCALE_DEVICE_MESH
+from .api import VESCALE_DEVICE_MESH, VeDeviceMesh

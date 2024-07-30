@@ -56,9 +56,9 @@ class Placement:
         elif tensor[0] == 1:
             return Partial()
         elif tensor[0] == 2:
-            return Shard(dim=tensor[1])
+            return Shard(dim=tensor[1].item())
         elif tensor[0] == 3:
-            return InterleavedShard(dim=tensor[1], interleaved_size=tensor[2])
+            return InterleavedShard(dim=tensor[1].item(), interleaved_size=tensor[2].item())
 
 
 class Shard(Placement):

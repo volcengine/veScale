@@ -21,8 +21,9 @@ from typing import Callable
 import logging
 
 
-
 VESCALE_DISABLE_REDISTRIBUTE = os.environ.get("VESCALE_DISABLE_REDISTRIBUTE", "1") == "1"
+VESCALE_DUMMY_P2P = os.environ.get("VESCALE_DUMMY_P2P", "0") == "1"
+VESCALE_DUMP_INSTRUCTION = os.environ.get("VESCALE_DUMP_INSTRUCTION", "0") == "1"
 
 global VESCALE_SHARDING_SUGGETSION
 VESCALE_SHARDING_SUGGETSION = []

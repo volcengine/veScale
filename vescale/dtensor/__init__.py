@@ -25,7 +25,7 @@ from vescale.dtensor._utils import (
 )
 from vescale.dtensor.device_mesh import DeviceMesh, mesh_resources
 from vescale.dtensor.api import normalize_placements
-from vescale.dtensor.dtensor import DTensor
+from vescale.dtensor.dtensor import DTensor, make_dtensor
 from vescale.dtensor.ops.utils import normalize_to_torch_size
 from vescale.dtensor.placement_types import DTensorSpec, Placement, Replicate, TensorMeta
 
