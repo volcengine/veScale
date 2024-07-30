@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 ################################################################################
-# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 from common_dtensor import DTensorConverter, DTensorTestBase, with_comms

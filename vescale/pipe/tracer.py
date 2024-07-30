@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 import torch

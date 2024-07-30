@@ -1,7 +1,7 @@
 ################################################################################
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 ################################################################################
-# Modification Copyright 2024 ByteDance Ltd. and/or its affiliates.
+# Modification Copyright 2023 ByteDance Ltd. and/or its affiliates.
 ################################################################################
 
 from typing import Any, Tuple
