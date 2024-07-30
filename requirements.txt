@@ -8,4 +8,5 @@ optree
 accelerate
 transformers==4.40.2
 flash_attn
+matplotlib
 mmh3
