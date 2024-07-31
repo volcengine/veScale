@@ -69,7 +69,7 @@ class PipeModule(nn.Module):
         lr_scheduler: Callable,
         stage_deps: np.ndarray,
         p2p_index_mapping: Dict,
-        config: PipelineParallelPlan,
+        plan: PipelineParallelPlan,
     ):
         super().__init__()
         self.stage_modules = {}
@@ -84,9 +84,9 @@ class PipeModule(nn.Module):
         self.sync_chunk_ids = set()
         self.shared_path_this_stage = {}
         self.shared_module_mapping = {}
-        self.config = config
-        self.num_stages = self.config.num_stages
-        self.virtual_chunks = self.config.virtual_chunks
+        self.plan = plan
+        self.num_stages = self.plan.num_stages
+        self.virtual_chunks = self.plan.virtual_chunks
         self.stage_deps = stage_deps
         self.p2p_index_mapping = p2p_index_mapping
 
