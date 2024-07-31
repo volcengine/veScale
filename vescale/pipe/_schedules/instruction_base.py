@@ -27,13 +27,32 @@ from vescale.dtensor.placement_types import Placement
 from vescale.pipe.pipe_stage import PipeModule
 from typing import List, Tuple, Union, Optional, Dict, Any
 import logging
+import functools
 import numpy as np
+from optree import tree_map
+from vescale.dtensor.dtensor import DTensor
 from vescale.plan.spec import PipelineP2PSpec
 
 Shape = Union[List[int], torch.Size]
 
 logger = logging.getLogger(__name__)
 registed_functions = {}
+
+
+def switch_dtensor(func: Callable):
+    @functools.wraps(func)
+    def wrap(*args, **kwargs):
+        def to_tensor(x):
+            if isinstance(x, DTensor):
+                return x.to_local()
+            return x
+
+        new_args = tree_map(to_tensor, args)
+        new_kwargs = tree_map(to_tensor, kwargs)
+        out = func(*new_args, **new_kwargs)
+        return out
+
+    return wrap
 
 
 def register_instruction(name):

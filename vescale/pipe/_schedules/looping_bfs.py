@@ -26,6 +26,7 @@ from vescale.pipe._schedules.instruction_base import (
     VESCALE_INTRUCTION_BUILDER as builder,
     register_instruction,
     registed_functions,
+    switch_dtensor,
 )
 import contextlib
 from dataclasses import dataclass, field
@@ -46,7 +47,6 @@ from vescale.pipe.p2p_communication import (
     send_forward_recv_forward,
     send_backward_recv_backward,
 )
-from vescale.model.base_gpt.utils import switch_dtensor
 
 
 @dataclass

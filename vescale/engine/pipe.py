@@ -36,7 +36,7 @@ class PipeEngine:
         module: PipeModule,
         global_mesh: VeDeviceMesh,
         loss_fn: Callable,
-        config: PipelineParallelPlan,
+        plan: PipelineParallelPlan,
     ):
         """
         Training engine for pipeline parallelism and multi-dimensional
@@ -46,8 +46,8 @@ class PipeEngine:
         training, and optimizer synchronization.
         """
         self.module = module
-        self.virtual_chunks_per_stage = config.virtual_chunks
-        self.engine_config = config
+        self.virtual_chunks_per_stage = plan.virtual_chunks
+        self.engine_plan = plan
         self.optimizer = self.module.get_optimizer
         self.lr_scheduler = self.module.get_lr_scheduler
         self.global_mesh = global_mesh
@@ -59,16 +59,16 @@ class PipeEngine:
             except:  # noqa: E722
                 self.loss_fn = loss_fn
         self.schedule_engine = None
-        self.reuse_comm_shape = self.engine_config.reuse_p2p_tensor_shape
+        self.reuse_comm_shape = self.engine_plan.reuse_p2p_tensor_shape
         if self.reuse_comm_shape:
             os.environ["REUSE_COMM_SHAPE"] = "1"
         if (
-            self.engine_config.schedule_type == PipelineScheduleType.INTERLEAVED_1F1B
+            self.engine_plan.schedule_type == PipelineScheduleType.INTERLEAVED_1F1B
             and self.virtual_chunks_per_stage == 1
         ):
             print("[warning]: #virtual pipeline chunks is 1. Falling back to simple 1F1B schedule.")
-            self.engine_config.schedule_type = PipelineScheduleType.SIMPLE_1F1B
-        self.schedule_type = self.engine_config.schedule_type
+            self.engine_plan.schedule_type = PipelineScheduleType.SIMPLE_1F1B
+        self.schedule_type = self.engine_plan.schedule_type
 
     def build_schedule(self, minibatches, data_shape=None):
         """
@@ -105,7 +105,7 @@ class PipeEngine:
         )
         num_minibatches = self._align_num_batches(first_stage_rank, len(minibatches))
         # TODO: insert shape inference
-        batch_p2p_comm = self.engine_config.batch_p2p_comm
+        batch_p2p_comm = self.engine_plan.batch_p2p_comm
         # if on interleaved 1f1b schedule, set batch_p2p_comm to False to execute p2p communication
         schedule_type = self.schedule_type
         if schedule_type in [PipelineScheduleType.INTERLEAVED_1F1B, PipelineScheduleType.ZERO_BUBBLE]:
@@ -123,16 +123,16 @@ class PipeEngine:
             data_iterator=data_iterator,
             stage_id=self.global_mesh.get_pipeline_parallel_rank(),
             shape=data_shape,
-            dtype=self.engine_config.p2p_tensor_dtype,
+            dtype=self.engine_plan.p2p_tensor_dtype,
             num_chunks=self.virtual_chunks_per_stage,
             input_shapes=None,
             input_shapes_unpad=None,
             # send_dtypes_map=self.module.recv_dtypes_dict,
-            overlap_p2p_comm=self.engine_config.overlap_p2p_comm,
+            overlap_p2p_comm=self.engine_plan.overlap_p2p_comm,
             batch_p2p_comm=batch_p2p_comm,
             loss_fn=self.loss_fn,
             global_mesh=self.global_mesh,
-            forward_only=self.engine_config.forward_only,
+            forward_only=self.engine_plan.forward_only,
         )
 
     def forward_backward(
@@ -211,7 +211,7 @@ class PipeEngine:
     def sync_shared_params(self, group_id: int = 0, share_params=True) -> None:
         """
         Synchronize gradients and weights among groups of specified units, dictated by
-        "partition_units" in PipelineConfig. Typically, this function is used for
+        "partition_units" in PipelineParallelPlan. Typically, this function is used for
         synchronizing gradients and weights of embeddings layers in Transformer-based
         architecture.
         Args:

@@ -20,7 +20,7 @@ import torch
 from common_dtensor import DTensorTestBase, with_comms
 from torch.testing._internal.common_utils import run_tests
 from vescale.devicemesh_api import VESCALE_DEVICE_MESH
-from vescale.pipe.pipe_stage import PipeModule, construct_stage_modules
+from vescale.pipe.pipe_stage import construct_pipeline_stage
 from vescale.pipe._schedules.instruction_base import StageDeps
 from vescale.pipe.pipe_emmiter import ScheduleEngine
 from vescale.plan.spec import PipelineScheduleType, ModeType, PipelineSplitMethodType
@@ -79,13 +79,6 @@ class ScheduleEngineRuntimeTest(DTensorTestBase):
             schedule_type=PipelineScheduleType.SIMPLE_1F1B,
         )
 
-        stage_modules, stage_dependency, p2p_index_mapping = construct_stage_modules(
-            model,
-            config,
-            VESCALE_DEVICE_MESH,
-            update_split_points=True,
-        )
-
         optimizer_fn_kwargs = {
             "lr": 0.01,
             "momentum": 0,
@@ -96,9 +89,15 @@ class ScheduleEngineRuntimeTest(DTensorTestBase):
             "foreach": None,
             "differentiable": False,
         }
-        _parameters = list(stage_modules[0].parameters())
-        optimizer = SGD(_parameters, **optimizer_fn_kwargs)
-        pipe_module = PipeModule(stage_modules, optimizer, None, stage_dependency, p2p_index_mapping, config)
+        pipe_module = construct_pipeline_stage(
+            model,
+            config,
+            VESCALE_DEVICE_MESH,
+            lr_scheduler=None,
+            update_split_points=True,
+        )
+        optimizer = SGD(pipe_module.parameters(), **optimizer_fn_kwargs)
+        pipe_module.doptimizer = optimizer
 
         dep = pipe_module.stage_deps
         device_mesh_list = VESCALE_DEVICE_MESH.get_global_tensor_parallel_meshes()

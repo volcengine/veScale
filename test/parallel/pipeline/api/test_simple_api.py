@@ -20,7 +20,6 @@ from common_dtensor import DTensorTestBase, with_comms
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import run_tests
-from vescale.debug.pdb import ForkedPdb
 from vescale.optim.base_optimizer import BasicOptimizer
 from vescale.pipe.pipe_stage import construct_pipeline_stage
 from vescale.devicemesh_api import VESCALE_DEVICE_MESH

@@ -225,7 +225,7 @@ class PipelineAccuracyAlignmentTest(DTensorTestBase):
             pipe_config,
         )
 
-        engine.forward_backward(batch)
+        engine(batch)
         optimizer = engine.get_optimizer
         optimizer.step()
 

@@ -31,6 +31,7 @@ from vescale.pipe._schedules.instruction_base import (
     Shape,
     registed_functions,
     VESCALE_INTRUCTION_BUILDER as builder,
+    switch_dtensor,
 )
 from vescale.pipe.p2p_communication import (
     recv_backward,
@@ -47,7 +48,6 @@ from torch.distributed._functional_collectives import send, recv
 from vescale.dtensor.placement_types import Placement
 from vescale.dtensor._utils import compute_global_tensor_info
 from torch.distributed.distributed_c10d import _get_default_group
-from vescale.model.base_gpt.utils import switch_dtensor
 
 import logging
 

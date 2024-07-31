@@ -20,6 +20,8 @@ _**An Industrial-Level Framework for Easy-of-Use**_
 
 ## Latest News
 
+- [2024-7-25] veScale's [pipeline parallelism](https://github.com/volcengine/veScale/blob/main/vescale/pipe/README.md) open sourced with API, graph parser, stage abstraction, schedules and execution runtime along with [nD distributed timeline](https://github.com/volcengine/veScale/blob/main/vescale/ndtimeline/README.md).
+
 - [2024-5-31] veScale's [fast checkpointing system](https://github.com/volcengine/veScale/blob/main/vescale/checkpoint/README.md) open sourced with automatic checkpoint resharding, caching, load-balancing, fast copying, deduplicating, and asynchronous io.
 
 - [2024-5-21] veScale's examples ([Mixtral](https://github.com/volcengine/veScale/tree/main/examples/mixtral_4D_training), [LLama2](https://github.com/volcengine/veScale/tree/main/examples/llama2_4D_finetune), and [nanoGPT](https://github.com/volcengine/veScale/tree/main/examples/nanogpt_4D_finetune)) open sourced with bit-wise correctness of training loss curves.
@@ -32,7 +34,11 @@ _**An Industrial-Level Framework for Easy-of-Use**_
 
 _**veScale**_ is still in its early phase. We are refactoring our internal LLM training system components to meet open source standard. The tentative timeline is as follows:
 
-- by end of July, CUDA event monitor, pipeline parallelism and supporting components for large-scale training
+- High-level [nD parallel api](https://github.com/volcengine/veScale/issues/39) for extreme ease of use
+
+- Power-user plan api for easy customization of nD parallel training
+
+- End-to-end vescale/examples with 5D parallel training (TP, SP, DP, ZeRO, PP)
 
 ## Table of Content ([web view](https://volcengine.github.io/veScaleWeb/))
 
