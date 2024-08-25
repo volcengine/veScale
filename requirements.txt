@@ -2,7 +2,7 @@
 --pre
 expecttest
 hypothesis
-pytest
+pytest<8.0.0
 tqdm
 optree
 accelerate
