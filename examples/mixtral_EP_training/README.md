@@ -52,6 +52,5 @@ cd ../..
 ### Training Command
 
 ```
-cd data/shakespeare/ && python3 prepare.py && cd ../..
 torchrun --standalone --nproc_per_node={GPU_CNT} mixtral_train.py --dp={dp_size} --tp={tp_size} --max_iters={max_iters}
 ```
