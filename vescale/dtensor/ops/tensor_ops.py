@@ -443,7 +443,9 @@ def _prop_select(op_schema: OpSchema) -> OutputSharding:
     for p in placements:
         # Using isinstance instead of is_shard so that mypy won't complain
         # about accessing dim attribute.
-        if isinstance(p, Shard) and p.dim > dim:
+        if isinstance(p, InterleavedShard) and p.dim > dim:
+            new_placements.append(InterleavedShard(p.dim - 1, p.interleaved_size))
+        elif isinstance(p, Shard) and p.dim > dim:
             new_placements.append(Shard(p.dim - 1))
         else:
             new_placements.append(p)
@@ -1089,7 +1091,6 @@ def unbind_rule(op_schema: OpSchema) -> OutputSharding:
             placements=unshard_tensor_dim(input_spec.placements, dim=dim),
             tensor_meta=input_spec.tensor_meta,
         )
-
     if need_reshard:
         return OutputSharding(
             None,

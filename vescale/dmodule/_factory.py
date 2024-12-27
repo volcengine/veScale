@@ -38,7 +38,7 @@ from vescale.dmodule.placements_interface import PlacementsInterface as PI
 
 __all__ = ["wrap_factory_mode"]
 
-_IS_DEBUG = True
+_IS_DEBUG = False
 
 aten = torch.ops.aten
 

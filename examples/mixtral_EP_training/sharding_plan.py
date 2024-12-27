@@ -19,7 +19,6 @@
 
 from vescale.dtensor.placement_types import Replicate, Shard
 
-
 param_sharding_plan = {
     "mixtral_model.model.embed_tokens.weight": [Replicate()],
     r"mixtral_model.model.layers.\d+.input_layernorm.weight": [Replicate()],  # MixtralRMSNorm
@@ -27,8 +26,8 @@ param_sharding_plan = {
     r"mixtral_model.model.layers.\d+.self_attn.k_proj.weight": [Shard(0)],
     r"mixtral_model.model.layers.\d+.self_attn.v_proj.weight": [Shard(0)],
     # TODO: buggy, cos_cached or sin_cached can be updated or recreated if seqlen exceeds the max seqlen.
-    r"mixtral_model.model.layers.\d+.self_attn.rotary_emb.layers.\d+.cos_cached": [Replicate()],
-    r"mixtral_model.model.layers.\d+.self_attn.rotary_emb.layers.\d+.sin_cached": [Replicate()],
+    r"mixtral_model.model.layers.\d+.self_attn.rotary_emb.cos_cached": [Replicate()],
+    r"mixtral_model.model.layers.\d+.self_attn.rotary_emb.sin_cached": [Replicate()],
     r"mixtral_model.model.layers.\d+.self_attn.o_proj.weight": [Shard(1)],
     r"mixtral_model.model.layers.\d+.post_attention_layernorm.weight": [Replicate()],
     r"mixtral_model.model.layers.\d+.block_sparse_moe.gate.weight": [Replicate()],
@@ -39,38 +38,10 @@ param_sharding_plan = {
 }
 
 fwd_resharding_plan = {
-    # TODO: buggy: attn mask is torch.Tensor, in training, it's a None
-    r".input": {"input_ids": [Replicate()], "attention_mask": [Replicate()]},
-    "mixtral_model.model.embed_tokens.input": [[Replicate()]],
-    # No SP
-    # r"layers.\d+.input_layernorm.input": [[Replicate()]],
-    # r"layers.\d+.input_layernorm.output": [[Replicate()]],
-    # SP
-    r"mixtral_model.model.layers.\d+.input_layernorm.input": [[Shard(1)]],
-    r"mixtral_model.model.layers.\d+.input_layernorm.output": [[Shard(1)]],
+    "mixtral_model.model.embed_tokens.output": [[Shard(1)]],
     r"mixtral_model.model.layers.\d+.self_attn.input": [[Replicate()]],
-    r"mixtral_model.model.layers.\d+.self_attn.output": {
-        "attn_output": [Replicate()],
-        "attn_weights": None,
-        "past_key_value": None,
-    },
-    r"mixtral_model.model.layers.\d+.self_attn.o_proj.output": [[Replicate()]],
-    # No SP
-    # r"model.layers.\d+.post_attention_layernorm.input": [[Replicate()]],
-    # r"model.layers.\d+.post_attention_layernorm.output": [[Replicate()]],
-    # SP
-    r"mixtral_model.model.layers.\d+.post_attention_layernorm.input": [[Shard(1)]],
-    r"mixtral_model.model.layers.\d+.post_attention_layernorm.output": [[Shard(1)]],
-    r"mixtral_model.model.layers.\d+.block_sparse_moe.input": [[Replicate()]],
-    r"mixtral_model.model.layers.\d+.block_sparse_moe.gate.output": [[Replicate()]],
-    r"mixtral_model.model.layers.\d+.block_sparse_moe.output": {
-        "final_hidden_states": [Replicate()],
-        "router_logits": [Replicate()],
-    },
-    r"mixtral_model.model.layers.\d+.block_sparse_moe.experts.\d+.w1.input": [[Replicate()]],
-    r"mixtral_model.model.layers.\d+.block_sparse_moe.experts.\d+.w3.input": [[Replicate()]],
-    r"mixtral_model.model.layers.\d+.block_sparse_moe.experts.\d+.w2.output": [[Replicate()]],
-    "mixtral_model.model.norm.input": [[Replicate()]],
+    r"mixtral_model.model.layers.\d+.self_attn.o_proj.output": [[Shard(1)]],
+    "mixtral_model.lm_head.input": [[Replicate()]],
 }
 
 mixtral_plan = {"parameter": param_sharding_plan, "forward": fwd_resharding_plan}

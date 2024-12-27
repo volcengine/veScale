@@ -24,13 +24,16 @@ import torch
 import torch.distributed as dist
 
 from vescale.dmodule import parallelize_module
+from vescale.dtensor.placement_types import InterleavedShard
+from vescale.moe import parallelize_experts, MoEOptimizer
 from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 from vescale.optim.base_optimizer import BasicOptimizer
 from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 from vescale.dtensor.random import manual_seed
+from vescale import DTensor
 
-from transformers.models.mixtral.modeling_mixtral import MixtralForCausalLM, MixtralSparseMoeBlock
+from transformers.models.mixtral.modeling_mixtral import MixtralForCausalLM, MixtralSparseMoeBlock, MixtralModel
 from transformers.models.mixtral.configuration_mixtral import MixtralConfig
 from sharding_plan import mixtral_plan
 
@@ -49,6 +52,52 @@ class Net(torch.nn.Module):
         labels = labels.flatten()
         loss = self.loss_fn(logits, labels)
         return loss
+
+
+def wrap_moe_block(forward_func):
+    old_func_dict = {}
+
+    def _pre_forward_overload():
+        nonlocal old_func_dict
+        old_func_dict = {}
+        old_func_dict["where"] = torch.where
+        old_func_dict["index_select"] = DTensor.__getitem__
+
+        def local_where(*args, **kwargs):
+            output = old_func_dict["where"](*args, **kwargs)
+            if isinstance(output, DTensor):
+                return output.to_local()
+            elif isinstance(output, torch.Tensor):
+                return output
+            elif isinstance(output, tuple):
+                output_list = []
+                for t in output:
+                    if isinstance(t, DTensor):
+                        output_list.append(t.to_local())
+                    else:
+                        output_list.append(t)
+                return tuple(output_list)
+            else:
+                raise NotImplementedError
+
+        def local_index_select(*args, **kwargs):
+            return old_func_dict["index_select"](args[0].to_local(), *args[1:], **kwargs)
+
+        torch.where = local_where
+        DTensor.__getitem__ = local_index_select
+
+    def _post_forward_overload():
+        nonlocal old_func_dict
+        torch.where = old_func_dict["where"]
+        DTensor.__getitem__ = old_func_dict["index_select"]
+
+    def forward(*args, **kwargs):
+        _pre_forward_overload()
+        output = forward_func(*args, **kwargs)
+        _post_forward_overload()
+        return output
+
+    return forward
 
 
 def estimate_mixtral(config, bsz, sqence_length):
@@ -107,11 +156,19 @@ def run_mixtral(args):
         model = Net(mixtral_config)
         model.to(ptdtype)
 
+        experts_module_name = r"mixtral_model.model.layers.\d+.block_sparse_moe.experts"
+
+        factory = {
+            MixtralSparseMoeBlock: {torch.zeros: [InterleavedShard(0, args.bsz // args.dp)]},
+            MixtralModel: True,
+        }
+        MixtralSparseMoeBlock.forward = wrap_moe_block(MixtralSparseMoeBlock.forward)
+
         model = parallelize_module(
             model,
             VESCALE_DEVICE_MESH["TP"],
             mixtral_plan,
-            factory=True,
+            factory=factory,
         )
 
         model = DDP(
@@ -119,7 +176,18 @@ def run_mixtral(args):
             VESCALE_DEVICE_MESH["DP"],
             accumulate_allreduce_grads_in_fp32=False,
             use_distributed_optimizer=args.use_DO,
-            whitelist_module_types=[MixtralSparseMoeBlock],
+        )
+
+        moe_config = {
+            "num_layers": mixtral_config.num_hidden_layers,
+            "num_experts": mixtral_config.num_local_experts,
+            "num_devices": torch.distributed.get_world_size(),
+        }
+
+        model = parallelize_experts(
+            model,
+            experts_module_name,
+            config=moe_config,
         )
     else:
         model = Net(mixtral_config).to(device)
@@ -131,14 +199,16 @@ def run_mixtral(args):
         param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
-        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2 and "experts" not in n]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2 and "experts" not in n]
+        moe_params = [p for n, p in param_dict.items() if "experts" in n]
         optim_groups = [
             {"params": decay_params, "weight_decay": weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        num_moe_params = sum(p.numel() for p in moe_params)
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and (world_size == 1 or device_mesh.device_type == "cuda")
@@ -147,6 +217,7 @@ def run_mixtral(args):
         if world_size == 1 or dist.get_rank() == 0:
             print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
             print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+            print(f"experts parameter tensors: {len(moe_params)}, with {num_moe_params:,} parameters")
             print(f"using fused AdamW: {use_fused}")
         # + + + Initialize a ZeRO-2 optimizer using veScale API
         if args.use_DO and world_size > 1:
@@ -156,13 +227,36 @@ def run_mixtral(args):
                 clip_grad=args.grad_clip,
                 grad_to_fp32=False,
             )
+            moe_optimizer = MoEOptimizer(
+                torch.optim.AdamW,
+                clip_grad=args.grad_clip,
+                param_buffer=model.moe_param_buffer,
+                lr=learning_rate,
+                betas=betas,
+                weight_decay=weight_decay,
+                **extra_args,
+            )
         elif world_size > 1:
             optimizer = BasicOptimizer(base_optimizer, models=model)
+            moe_optimizer = MoEOptimizer(
+                torch.optim.AdamW,
+                clip_grad=args.grad_clip,
+                param_buffer=model.moe_param_buffer,
+                lr=learning_rate,
+                betas=betas,
+                weight_decay=weight_decay,
+                **extra_args,
+            )
         else:
             optimizer = base_optimizer
-        return optimizer
+            moe_optim_groups = [
+                {"params": moe_params, "weight_decay": weight_decay},
+            ]
+            moe_optimizer = torch.optim.AdamW(moe_optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        return optimizer, moe_optimizer
 
-    doptimizer = configure_optimizers(model, args.weight_decay, args.lr, (0.9, 0.95))
+    # TODO: wrap up them into a single optimizer
+    doptimizer, moe_optimizer = configure_optimizers(model, args.weight_decay, args.lr, (0.9, 0.95))
 
     # learning rate decay scheduler (cosine with warmup)
     def get_lr(it):
@@ -201,13 +295,11 @@ def run_mixtral(args):
     start.record()
     model.train()
     for iter in range(args.max_iters):
-        if iter % args.eval_interval == 0:
-            out = estimate_loss()
-            if world_size == 1 or dist.get_rank() == 0:
-                print(f"iter {iter} train_loss: {out['train']:.6f} val_loss: {out['val']:.6f}")
         # determine and set the learning rate for this iteration
         lr = get_lr(iter) if args.decay_lr else args.lr
         for param_group in doptimizer.param_groups if world_size == 1 else doptimizer.optimizer.param_groups:
+            param_group["lr"] = lr
+        for param_group in moe_optimizer.param_groups:
             param_group["lr"] = lr
         # load a batch of training data
         X, Y = data_loader.get_batch("train", args.bsz, args.bsz // args.dp)
@@ -226,9 +318,12 @@ def run_mixtral(args):
             model.finish_grad_sync()
         if world_size > 1 and args.grad_clip > 0:
             grad_norm = doptimizer.step()
+            moe_optimizer.step()
         else:
             doptimizer.step()
+            moe_optimizer.step()
         doptimizer.zero_grad(set_to_none=True)
+        moe_optimizer.zero_grad(set_to_none=True)
         end_epoch.record()
         torch.cuda.synchronize()
         epoch_t = start_epoch.elapsed_time(end_epoch)
@@ -295,7 +390,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--warmup_iters", type=int, default=100)
     parser.add_argument("--min_lr", type=float, default=3e-5)
-    parser.add_argument("--grad_clip", type=float, default=1)
+    parser.add_argument("--grad_clip", type=float, default=0)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     return parser
 

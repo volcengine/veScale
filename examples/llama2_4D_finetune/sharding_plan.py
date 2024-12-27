@@ -45,19 +45,19 @@ _decoder_param_sharding_plan = {
 
 # forward resharding plan for the whole open llama model
 model_fwd_resharding_plan = {
-    "model.input": [[Replicate()]],
-    "model.embed_tokens.output": [[Shard(1)]],
-    "model.norm.input": [[Shard(1)]],
-    "model.output": {
+    "llama_model.model.input": [[Replicate()]],
+    "llama_model.model.embed_tokens.output": [[Shard(1)]],
+    "llama_model.model.norm.input": [[Shard(1)]],
+    "llama_model.model.output": {
         "last_hidden_state": [Replicate()],
     },
-    **{rf"model.layers.\d+.{k}": v for k, v in _decoder_fwd_resharding_plan.items()},
+    **{rf"llama_model.model.layers.\d+.{k}": v for k, v in _decoder_fwd_resharding_plan.items()},
 }
 
 # model parameter sharding plan for the whole open llama model
 model_param_sharding_plan = {
-    "model.embed_tokens.weight": [Shard(1)],
-    **{rf"model.layers.\d+.{k}": v for k, v in _decoder_param_sharding_plan.items()},
+    "llama_model.model.embed_tokens.weight": [Shard(1)],
+    **{rf"llama_model.model.layers.\d+.{k}": v for k, v in _decoder_param_sharding_plan.items()},
 }
 
 llama2_plan = {"parameter": model_param_sharding_plan, "forward": model_fwd_resharding_plan}

@@ -270,7 +270,7 @@ def distribute_tensor(
         return results
 
     target_spec = DTensorSpec(mesh=device_mesh, placements=placements, tensor_meta=None)
-    
+
     placements: Tuple[Placement] = tuple([Replicate()] * device_mesh.ndim)
     tensor_meta = TensorMeta(shape=tensors[0].shape, stride=tensors[0].stride(), dtype=tensors[0].dtype)
     current_spec = DTensorSpec(mesh=device_mesh, placements=placements, tensor_meta=tensor_meta)

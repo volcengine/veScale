@@ -30,6 +30,7 @@ from vescale.dtensor.placement_types import (
 from vescale.dtensor.sharding_prop import ShardingPropagator
 from vescale.dtensor.redistribute import (
     Redistribute,
+    CrossMeshRedistribute,
     redistribute_local_tensor,
 )
 from vescale.dtensor._utils import compute_global_tensor_info, gather_local_tensor_shape
@@ -519,6 +520,21 @@ class DTensor(torch.Tensor):
         placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, tensor_ndim=self.ndim)
 
         return Redistribute.apply(self, device_mesh, placements, async_op)
+
+    def cross_mesh_redistribute(
+        self,
+        device_mesh: Optional[DeviceMesh] = None,
+        placements: Optional[Sequence[Placement]] = None,
+        async_op: bool = True,
+    ) -> "DTensor":
+        device_mesh = device_mesh or self._spec.mesh
+
+        # check new placements for not specified
+        if placements is None:
+            raise RuntimeError("placements is needed for redistribute!")
+        placements: Tuple[Placement] = normalize_placements(placements, device_mesh.ndim, tensor_ndim=self.ndim)
+
+        return CrossMeshRedistribute.apply(self, device_mesh, placements, async_op)
 
     def requires_grad_(self, mode=True):
         self._local_tensor.requires_grad_(mode)

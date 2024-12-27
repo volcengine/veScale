@@ -209,7 +209,9 @@ class TestMeshCollectives(DTensorTestBase):
         local_tensor_list = [torch.cat(local_tensor_list, dim=0)]
         local_tensor_list = list(torch.chunk(local_tensor_list[0], group_world_size, dim=0))
 
-        vescale.dtensor._collective_utils.mesh_all_to_all(ground_truth_list, local_tensor_list, self.vescale_mesh, mesh_dim)
+        vescale.dtensor._collective_utils.mesh_all_to_all(
+            ground_truth_list, local_tensor_list, self.vescale_mesh, mesh_dim
+        )
         mesh_all_to_all(outputs_list, data_list, self.mesh, mesh_dim)
 
         local_output = outputs_list[torch_rank]

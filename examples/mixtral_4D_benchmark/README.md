@@ -11,7 +11,7 @@ from HuggingFace without any model code modifications.
 
 ### Single Machine 8 cards
 ```
-torchrun --nproc-per-node=8 --nnodes=1 --master-port=42516  -- examples/mixtral_4D_benchmark/mixtral_train.py --num_hidden_layers=16
+torchrun --nproc-per-node=8 --standalone examples/mixtral_4D_benchmark/mixtral_train.py --num_hidden_layers=16
 ```
 This will start a 8-cards MFU benchmark for Mixtral with veScale with dp=1 and tp=8.
 

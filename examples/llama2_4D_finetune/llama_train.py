@@ -37,6 +37,20 @@ from sharding_plan import llama2_plan
 from data_loader import DataLoader
 
 
+class Net(torch.nn.Module):
+    def __init__(self, path, torch_dtype):
+        super().__init__()
+        self.llama_model = LlamaForCausalLM.from_pretrained(path, torch_dtype=torch_dtype)
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+
+    def forward(self, input_ids, labels):
+        logits = self.llama_model(input_ids).logits
+        logits = logits.flatten(end_dim=-2)
+        labels = labels.flatten()
+        loss = self.loss_fn(logits, labels)
+        return loss
+
+
 def estimate_llama2(config, bsz, sqence_length):
     embed = 4 * bsz * sqence_length * config.hidden_size
     ff = 3 * 2 * config.hidden_size * config.intermediate_size * bsz * sqence_length
@@ -53,7 +67,7 @@ def run_llama2(args):
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         rank = int(os.environ["RANK"])
-        device = f"cuda:{rank}"
+        device = f"cuda:{local_rank}"
         torch.cuda.set_device(device)
         dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
         VESCALE_DEVICE_MESH.init_device_mesh(device, (args.dp, args.tp), mesh_dim_names=["DP", "TP"])
@@ -77,8 +91,8 @@ def run_llama2(args):
         "bfloat16": torch.bfloat16,
     }[args.dtype]
 
-    model = LlamaForCausalLM.from_pretrained("openlm-research/open_llama_3b", torch_dtype=ptdtype)
-    llama_config = model.config
+    model = Net("openlm-research/open_llama_3b", torch_dtype=ptdtype)
+    llama_config = model.llama_model.config
     if rank == 0:
         print(model)
         print(llama_config)
@@ -165,7 +179,7 @@ def run_llama2(args):
             losses = torch.zeros(args.eval_iters // factor).to(device)
             for k in range(args.eval_iters // factor):
                 X, Y = data_loader.get_batch(split, args.bsz * factor, factor * args.bsz // args.dp)
-                loss = model(X, labels=Y).loss
+                loss = model(X, Y)
                 if world_size > 1:
                     losses[k] = loss.to_local().item()
                 else:
@@ -198,7 +212,7 @@ def run_llama2(args):
         start_epoch.record()
         if world_size > 1:
             model.zero_grad_buffer()
-        loss = model(X, labels=Y).loss
+        loss = model(X, Y)
         loss.backward()
         grad_norm = -1
         if world_size == 1 and args.grad_clip > 0:

@@ -57,6 +57,8 @@ class _MeshEnv:
         cur_rank = device_mesh.get_rank()
         pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(-1, device_mesh.mesh.size(mesh_dim))
 
+        res_sub_mesh = None
+
         for mesh_1d in pg_ranks_by_dim:
             sub_mesh = DeviceMesh(
                 device_mesh.device_type,
@@ -67,10 +69,13 @@ class _MeshEnv:
             if cur_rank in mesh_1d:
                 res_sub_mesh = sub_mesh
 
-        res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
-        # Assign the current DeviceMesh as the parent of the child DeviceMesh.
-        self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-        return res_sub_mesh
+        if res_sub_mesh is None:
+            return None
+        else:
+            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
+            # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+            self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+            return res_sub_mesh
 
     def create_submesh_along_multi_dims(
         self, device_mesh: "DeviceMesh", mesh_dims: List[int], cur_rank: int = None

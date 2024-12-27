@@ -21,11 +21,12 @@ from vescale.dtensor._collective_utils import (
     mesh_reduce_scatter,
     mesh_scatter,
     mesh_all_to_all_single,
+    broadcast_across_mesh,
     wait,
 )
 from vescale.dtensor.device_mesh import DeviceMesh
 from vescale.dtensor.op_schema import DTensorSpec
-from vescale.dtensor.placement_types import InterleavedShard, Partial, Placement, Replicate, Shard
+from vescale.dtensor.placement_types import InterleavedShard, Partial, Placement, Replicate, Shard, TensorMeta
 from vescale.dtensor._utils import compute_global_stride
 
 _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
@@ -556,3 +557,102 @@ class Redistribute(torch.autograd.Function):
             )
 
         return (output_dtensor, None, None, None)
+
+
+class CrossMeshRedistribute(torch.autograd.Function):
+    @staticmethod
+    def forward(  # type: ignore[override]
+        # pyre-fixme[2]: Parameter must be annotated.
+        ctx,
+        input: "dtensor.DTensor",
+        device_mesh: DeviceMesh = None,
+        placements: Tuple[Placement] = None,
+        async_op: bool = True,
+    ):
+        previous_spec = input._spec
+        ctx.previous_spec = previous_spec
+        ctx.async_op = async_op
+
+        # step 1: redistribute to [Replicate()] * mesh_dimension
+        placements1 = [Replicate()] * previous_spec.mesh.ndim
+        full_tensor = input.redistribute(placements=placements1)
+
+        # step 2: broastcast across mesh
+        # select the sender through min-reduce
+        sender = previous_spec.mesh.mesh.min().to(input.device)
+        world_size = torch.distributed.get_world_size()
+        world_mesh = DeviceMesh(device_mesh.device_type, list(range(world_size)))
+        sender = mesh_all_reduce(sender, mesh=world_mesh, reduce_op=c10d.ReduceOp.MIN, mesh_dim=0)
+        # broadcast
+        local_full_tensor = broadcast_across_mesh(
+            full_tensor.to_local(),
+            sender.item(),
+            full_tensor.size(),
+            full_tensor.dtype,
+            device_mesh,
+        )
+
+        # step3: redistribute to the desired placements over the output mesh
+        placements2 = [Replicate()] * device_mesh.ndim
+        local_spec = DTensorSpec(device_mesh, placements2, tensor_meta=previous_spec.tensor_meta)
+        final_spec = DTensorSpec(device_mesh, placements, tensor_meta=previous_spec.tensor_meta)
+        output = redistribute_local_tensor(local_full_tensor, local_spec, final_spec, async_op)
+        output.requires_grad_(input.requires_grad)
+
+        return dtensor.DTensor(
+            output,
+            device_mesh,
+            placements,
+            shape=input.shape,
+            dtype=input.dtype,
+            requires_grad=input.requires_grad,
+            stride=input.stride(),
+        )
+
+    @staticmethod
+    # type: ignore[override]
+    def backward(ctx, grad_output: "dtensor.DTensor"):
+        previous_spec = ctx.previous_spec
+        async_op = ctx.async_op
+
+        # step 1: local replicate
+        target_spec = grad_output._spec
+        placements2 = [Replicate()] * target_spec.mesh.ndim
+        full_grad = grad_output.redistribute(placements=placements2).to_local()
+
+        # step 2: broastcast across mesh
+        local_sender = target_spec.mesh.mesh.min().to(grad_output.device)
+        world_size, rank = torch.distributed.get_world_size(), torch.distributed.get_rank()
+        world_mesh = DeviceMesh(target_spec.mesh.device_type, list(range(world_size)))
+        if rank != local_sender:
+            full_grad = torch.zeros(target_spec.shape, dtype=grad_output.dtype, device=grad_output.device)
+        global_sender = mesh_all_reduce(local_sender, mesh=world_mesh, reduce_op=c10d.ReduceOp.MIN, mesh_dim=0)
+        full_grad = mesh_all_reduce(full_grad, mesh=world_mesh, reduce_op=c10d.ReduceOp.SUM, mesh_dim=0)
+
+        local_full_tensor = broadcast_across_mesh(
+            full_grad,
+            global_sender,
+            full_grad.size(),
+            full_grad.dtype,
+            previous_spec.mesh,
+        )
+
+        # step3: redistribute to the desired placements over the output mesh
+        placements1 = [Replicate()] * previous_spec.mesh.ndim
+        local_spec = DTensorSpec(previous_spec.mesh, placements1, tensor_meta=previous_spec.tensor_meta)
+        final_spec = DTensorSpec(previous_spec.mesh, previous_spec.placements, tensor_meta=previous_spec.tensor_meta)
+        previous_local_tensor = redistribute_local_tensor(local_full_tensor, local_spec, final_spec, async_op)
+        previous_spec.tensor_meta = TensorMeta(
+            shape=grad_output.shape, stride=grad_output.stride(), dtype=grad_output.dtype
+        )
+
+        previous_dtensor = dtensor.DTensor(
+            previous_local_tensor,
+            previous_spec.mesh,
+            previous_spec.placements,
+            shape=grad_output.shape,
+            dtype=grad_output.stride(),
+            requires_grad=grad_output.requires_grad,
+            stride=grad_output.dtype,
+        )
+        return previous_dtensor, None, None, None

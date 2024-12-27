@@ -28,7 +28,7 @@ from vescale.dtensor.device_mesh import DeviceMesh
 __all__ = ["auto_parallelize_module", "set_plan_overriding_policy", "get_plan_overriding_policy"]
 
 
-_IS_DEBUG = True
+_IS_DEBUG = False
 
 _PARAM_PLAN_OVERRIDING_POLICY = "PARAM_PLAN_OVERRIDING_POLICY"
 _FWD_PLAN_OVERRIDING_POLICY = "FWD_PLAN_OVERRIDING_POLICY"

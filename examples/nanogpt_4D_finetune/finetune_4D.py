@@ -112,9 +112,10 @@ def main():
     # ddp = world_size > 1
     ddp = int(os.environ.get("RANK", -1)) != -1
     if ddp:
+        local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         rank = int(os.environ["RANK"])
-        device = f"cuda:{rank}"
+        device = f"cuda:{local_rank}"
         torch.cuda.set_device(device)
         init_process_group(backend=backend, world_size=world_size, rank=rank)
         # + + + VeScale API below
