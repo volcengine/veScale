@@ -119,7 +119,7 @@ def run_mixtral(args):
             VESCALE_DEVICE_MESH["DP"],
             accumulate_allreduce_grads_in_fp32=False,
             use_distributed_optimizer=args.use_DO,
-            whitelist_module_types=[MixtralSparseMoeBlock],
+            module_to_enforce=[MixtralSparseMoeBlock],
         )
     else:
         model = Net(mixtral_config).to(device)

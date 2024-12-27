@@ -171,11 +171,14 @@ def run_mixtral(args):
             factory=factory,
         )
 
+        param_to_ignore = [param_name for param_name, _ in model.named_parameters() if "experts" in param_name]
+
         model = DDP(
             model,
             VESCALE_DEVICE_MESH["DP"],
             accumulate_allreduce_grads_in_fp32=False,
             use_distributed_optimizer=args.use_DO,
+            param_to_ignore=param_to_ignore,
         )
 
         moe_config = {

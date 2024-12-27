@@ -4,8 +4,8 @@ import torch.distributed as dist
 from abc import ABC, abstractmethod
 from vescale import DeviceMesh
 
-class TokenDispatcher(ABC):
 
+class TokenDispatcher(ABC):
     @abstractmethod
     def __init__(self, exp_config=None, env_config=None):
         pass
@@ -28,7 +28,6 @@ class TokenDispatcher(ABC):
 
 
 class BasicTokenDispatcher(TokenDispatcher):
-
     def __init__(self, exp_config=None, env_config=None):
         self.experts_alloc: Optional[List[Optional[DeviceMesh]]] = None
         self.expert_id: Optional[torch.Tensor] = None

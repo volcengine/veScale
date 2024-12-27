@@ -17,7 +17,7 @@
 
 from .api import parallelize_experts, is_experts_parallized
 from .moe_optimizer import MoEOptimizer
-from experts_allocator import ExpertsAllocator
-from token_dispatcher import TokenDispatcher
+from .experts_allocator import ExpertsAllocator
+from .token_dispatcher import TokenDispatcher
 
 __all__ = ["parallelize_experts", "is_experts_parallized", "MoEOptimizer", "ExpertsAllocator", "TokenDispatcher"]

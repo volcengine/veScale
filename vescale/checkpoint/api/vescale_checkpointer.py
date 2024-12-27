@@ -24,7 +24,7 @@ from ..planner.vescale.vescale_planner import VeScaleSavePlanner, VeScaleLoadPla
 from vescale.devicemesh_api import VESCALE_DEVICE_MESH
 from ..utilities import bfile
 import os
-from vescale.optim.checkpoint_helper import initialize_optimizer_state
+from vescale.optim.distributed_optimizer import initialize_optimizer_state
 import torch.distributed as dist
 from ..utilities.logger import get_vescale_checkpoint_logger
 import atexit
