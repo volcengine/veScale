@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 TORCH_VERSION_BIGGER_THAN_2_2 = torch.__version__ >= "2.2"
 
 
+def mesh_wait(tensor: torch.Tensor) -> torch.Tensor:
+    if isinstance(tensor, funcol.AsyncCollectiveTensor):
+        return funcol.wait_tensor(tensor)
+    return tensor
+
+
 # NOTE: upstream are working to migrate the following three collective
 # apis to be functional, pay attention to it.
 
@@ -346,6 +352,49 @@ def mesh_all_reduce(
         return tensor
 
     return funcol.all_reduce(tensor, reduceOp=reduce_op.name, group=mesh._dim_group_infos[mesh_dim][1])
+
+
+def broadcast_across_mesh(
+    tensor: torch.Tensor,
+    sender: int,
+    shape: torch.Size,
+    dtype: torch.dtype,
+    mesh: DeviceMesh,
+    async_op=False,
+) -> Optional[torch.Tensor]:
+    if DebugLogger.IS_DEBUG_MODE:
+        DebugLogger.log_communication(broadcast_across_mesh, tensor, sender, mesh)
+
+    recv_list = mesh.mesh.flatten().tolist()
+    rank = torch.distributed.get_rank()
+    group = torch.distributed.group.WORLD
+
+    comm_tensor = torch.empty(shape, dtype=dtype, device=mesh.device_type)
+    if rank == sender:
+        comm_tensor = tensor
+
+    if TORCH_VERSION_BIGGER_THAN_2_2:
+        comm_tensor = funcol.broadcast(comm_tensor, sender, group)
+    else:
+        work = broadcast(comm_tensor, sender, group, async_op=async_op)
+
+    if rank in recv_list:
+        if not async_op:
+            if TORCH_VERSION_BIGGER_THAN_2_2:
+                return funcol.wait_tensor(comm_tensor)
+            else:
+                return comm_tensor
+        else:
+            if TORCH_VERSION_BIGGER_THAN_2_2:
+                return comm_tensor
+            else:
+                from torch.distributed._functional_collectives_impl import _register_tensor_work
+                from torch.distributed._functional_collectives import _maybe_wrap_tensor
+
+                _register_tensor_work(comm_tensor, work)
+                return _maybe_wrap_tensor(comm_tensor)
+    else:
+        return torch.tensor([], device=mesh.device_type, dtype=tensor.dtype)
 
 
 def wait(tensor: torch.Tensor) -> torch.Tensor:

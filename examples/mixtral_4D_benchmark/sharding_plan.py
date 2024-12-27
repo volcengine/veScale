@@ -21,49 +21,49 @@ from vescale.dtensor.placement_types import Replicate, Shard
 
 
 param_sharding_plan = {
-    "embed_tokens.weight": [Replicate()],
-    r"layers.\d+.input_layernorm.weight": [Replicate()],  # MixtralRMSNorm
-    r"layers.\d+.self_attn.q_proj.weight": [Shard(0)],
-    r"layers.\d+.self_attn.k_proj.weight": [Shard(0)],
-    r"layers.\d+.self_attn.v_proj.weight": [Shard(0)],
+    "model.embed_tokens.weight": [Replicate()],
+    r"model.layers.\d+.input_layernorm.weight": [Replicate()],  # MixtralRMSNorm
+    r"model.layers.\d+.self_attn.q_proj.weight": [Shard(0)],
+    r"model.layers.\d+.self_attn.k_proj.weight": [Shard(0)],
+    r"model.layers.\d+.self_attn.v_proj.weight": [Shard(0)],
     # TODO: buggy, cos_cached or sin_cached can be updated or recreated if seqlen exceeds the max seqlen.
-    r"layers.\d+.self_attn.rotary_emb.layers.\d+.cos_cached": [Replicate()],
-    r"layers.\d+.self_attn.rotary_emb.layers.\d+.sin_cached": [Replicate()],
-    r"layers.\d+.self_attn.o_proj.weight": [Shard(1)],
-    r"layers.\d+.post_attention_layernorm.weight": [Replicate()],
-    r"layers.\d+.block_sparse_moe.gate.weight": [Replicate()],
-    r"layers.\d+.block_sparse_moe.experts.\d+.w1.weight": [Shard(0)],
-    r"layers.\d+.block_sparse_moe.experts.\d+.w3.weight": [Shard(0)],
-    r"layers.\d+.block_sparse_moe.experts.\d+.w2.weight": [Shard(1)],
-    "norm.weight": [Replicate()],
+    r"model.layers.\d+.self_attn.rotary_emb.layers.\d+.cos_cached": [Replicate()],
+    r"model.layers.\d+.self_attn.rotary_emb.layers.\d+.sin_cached": [Replicate()],
+    r"model.layers.\d+.self_attn.o_proj.weight": [Shard(1)],
+    r"model.layers.\d+.post_attention_layernorm.weight": [Replicate()],
+    r"model.layers.\d+.block_sparse_moe.gate.weight": [Replicate()],
+    r"model.layers.\d+.block_sparse_moe.experts.\d+.w1.weight": [Shard(0)],
+    r"model.layers.\d+.block_sparse_moe.experts.\d+.w3.weight": [Shard(0)],
+    r"model.layers.\d+.block_sparse_moe.experts.\d+.w2.weight": [Shard(1)],
+    "model.norm.weight": [Replicate()],
 }
 
 fwd_resharding_plan = {
     # TODO: buggy: attn mask is torch.Tensor, in training, it's a None
     r".input": {"input_ids": [Replicate()], "attention_mask": [Replicate()]},
-    "embed_tokens.input": [[Replicate()]],
+    "model.embed_tokens.input": [[Replicate()]],
     # No SP
     # r"layers.\d+.input_layernorm.input": [[Replicate()]],
     # r"layers.\d+.input_layernorm.output": [[Replicate()]],
     # SP
-    r"layers.\d+.input_layernorm.input": [[Shard(1)]],
-    r"layers.\d+.input_layernorm.output": [[Shard(1)]],
-    r"layers.\d+.self_attn.input": [[Replicate()]],
-    r"layers.\d+.self_attn.output": {"attn_output": [Replicate()], "attn_weights": None, "past_key_value": None},
-    r"layers.\d+.self_attn.o_proj.output": [[Replicate()]],
+    r"model.layers.\d+.input_layernorm.input": [[Shard(1)]],
+    r"model.layers.\d+.input_layernorm.output": [[Shard(1)]],
+    r"model.layers.\d+.self_attn.input": [[Replicate()]],
+    r"model.layers.\d+.self_attn.output": {"attn_output": [Replicate()], "attn_weights": None, "past_key_value": None},
+    r"model.layers.\d+.self_attn.o_proj.output": [[Replicate()]],
     # No SP
     # r"layers.\d+.post_attention_layernorm.input": [[Replicate()]],
     # r"layers.\d+.post_attention_layernorm.output": [[Replicate()]],
     # SP
-    r"layers.\d+.post_attention_layernorm.input": [[Shard(1)]],
-    r"layers.\d+.post_attention_layernorm.output": [[Shard(1)]],
-    r"layers.\d+.block_sparse_moe.input": [[Replicate()]],
-    r"layers.\d+.block_sparse_moe.gate.output": [[Replicate()]],
-    r"layers.\d+.block_sparse_moe.output": {"final_hidden_states": [Replicate()], "router_logits": [Replicate()]},
-    r"layers.\d+.block_sparse_moe.experts.\d+.w1.input": [[Replicate()]],
-    r"layers.\d+.block_sparse_moe.experts.\d+.w3.input": [[Replicate()]],
-    r"layers.\d+.block_sparse_moe.experts.\d+.w2.output": [[Replicate()]],
-    "norm.input": [[Replicate()]],
+    r"model.layers.\d+.post_attention_layernorm.input": [[Shard(1)]],
+    r"model.layers.\d+.post_attention_layernorm.output": [[Shard(1)]],
+    r"model.layers.\d+.block_sparse_moe.input": [[Replicate()]],
+    r"model.layers.\d+.block_sparse_moe.gate.output": [[Replicate()]],
+    r"model.layers.\d+.block_sparse_moe.output": {"final_hidden_states": [Replicate()], "router_logits": [Replicate()]},
+    r"model.layers.\d+.block_sparse_moe.experts.\d+.w1.input": [[Replicate()]],
+    r"model.layers.\d+.block_sparse_moe.experts.\d+.w3.input": [[Replicate()]],
+    r"model.layers.\d+.block_sparse_moe.experts.\d+.w2.output": [[Replicate()]],
+    "model.norm.input": [[Replicate()]],
 }
 
 mixtral_plan = {"parameter": param_sharding_plan, "forward": fwd_resharding_plan}

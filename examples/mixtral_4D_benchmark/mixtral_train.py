@@ -27,7 +27,7 @@ from vescale.ddp.distributed_data_parallel import DistributedDataParallel as DDP
 from vescale.optim.distributed_optimizer import DistributedOptimizer
 from vescale.initialize.deferred_init import deferred_init, is_deferred
 
-from transformers.models.mixtral.modeling_mixtral import MixtralModel
+from transformers.models.mixtral.modeling_mixtral import MixtralModel, MixtralSparseMoeBlock
 from transformers.models.mixtral.configuration_mixtral import MixtralConfig
 from sharding_plan import mixtral_plan
 
@@ -84,7 +84,7 @@ def run_mixtral(args):
         accumulate_allreduce_grads_in_fp32=True,
         overlap_grad_reduce=False,
         use_distributed_optimizer=True,
-        whitelist_module_types=[MixtralSparseMoeBlock],
+        module_to_enforce=[MixtralSparseMoeBlock],
     )
 
     doptim = DistributedOptimizer(

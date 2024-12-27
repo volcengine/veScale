@@ -326,6 +326,7 @@ class S2R(BaseRedistributeFunc):
                 return placement
             new_dim = placement.dim + tensor_ndim
             return Shard(new_dim)
+
         current_placement = normalize_dim_for_shard(current_placement, tensor=local_tensors[0])
         return _reshard_to_replicate_with_pad_one_dim(
             local_tensors,

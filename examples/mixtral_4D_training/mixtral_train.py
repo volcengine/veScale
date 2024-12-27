@@ -37,6 +37,20 @@ from sharding_plan import mixtral_plan
 from data_loader import DataLoader
 
 
+class Net(torch.nn.Module):
+    def __init__(self, mixtral_config):
+        super().__init__()
+        self.mixtral_model = MixtralForCausalLM(mixtral_config)
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+
+    def forward(self, input_ids, labels):
+        logits = self.mixtral_model(input_ids).logits
+        logits = logits.flatten(end_dim=-2)
+        labels = labels.flatten()
+        loss = self.loss_fn(logits, labels)
+        return loss
+
+
 def estimate_mixtral(config, bsz, sqence_length):
     embed = 4 * bsz * sqence_length * config.hidden_size
     # MixtralMoE consists of 3 linear layers.
@@ -57,7 +71,7 @@ def run_mixtral(args):
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         rank = int(os.environ["RANK"])
-        device = f"cuda:{rank}"
+        device = f"cuda:{local_rank}"
         torch.cuda.set_device(device)
         dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
         VESCALE_DEVICE_MESH.init_device_mesh(device, (args.dp, args.tp), mesh_dim_names=["DP", "TP"])
@@ -90,7 +104,7 @@ def run_mixtral(args):
     )
 
     if world_size > 1:
-        model = MixtralForCausalLM(mixtral_config)
+        model = Net(mixtral_config)
         model.to(ptdtype)
 
         model = parallelize_module(
@@ -104,11 +118,11 @@ def run_mixtral(args):
             model,
             VESCALE_DEVICE_MESH["DP"],
             accumulate_allreduce_grads_in_fp32=False,
-            use_distributed_optimizer=True,
-            whitelist_module_types=[MixtralSparseMoeBlock],
+            use_distributed_optimizer=args.use_DO,
+            module_to_enforce=[MixtralSparseMoeBlock],
         )
     else:
-        model = MixtralForCausalLM(mixtral_config).to(device)
+        model = Net(mixtral_config).to(device)
         model.to(ptdtype)
     print(f"rank {rank} cuda.rng_state {torch.cuda.get_rng_state().view(torch.int64)}")
 
@@ -170,7 +184,7 @@ def run_mixtral(args):
             losses = torch.zeros(args.eval_iters // factor).to(device)
             for k in range(args.eval_iters // factor):
                 X, Y = data_loader.get_batch(split, args.bsz * factor, factor * args.bsz // args.dp)
-                loss = model(X, labels=Y).loss
+                loss = model(X, Y)
                 if world_size > 1:
                     losses[k] = loss.to_local().item()
                 else:
@@ -203,7 +217,7 @@ def run_mixtral(args):
         start_epoch.record()
         if world_size > 1:
             model.zero_grad_buffer()
-        loss = model(X, labels=Y).loss
+        loss = model(X, Y)
         loss.backward()
         grad_norm = -1
         if world_size == 1 and args.grad_clip > 0:
@@ -274,11 +288,6 @@ def parse_args():
     parser.add_argument("--num_hidden_layers", type=int, default=2)
     parser.add_argument("--num_attention_heads", type=int, default=8)
     parser.add_argument("--num_key_value_heads", type=int, default=8)
-    # parser.add_argument("--hidden_size", type=int, default=4096)
-    # parser.add_argument("--intermediate_size", type=int, default=14336)
-    # parser.add_argument("--num_hidden_layers", type=int, default=16)
-    # parser.add_argument("--num_attention_heads", type=int, default=32)
-    # parser.add_argument("--num_key_value_heads", type=int, default=8)
 
     # Optimizer related
     parser.add_argument("--use_DO", type=bool, default=True)

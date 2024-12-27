@@ -30,7 +30,7 @@ from vescale.dtensor.ops.utils import (
     is_tensor_partial,
     register_op_strategy,
 )
-from vescale.dtensor.placement_types import DTensorSpec, Partial, Placement, Shard
+from vescale.dtensor.placement_types import DTensorSpec, Partial, Placement, Shard, InterleavedShard
 
 aten = torch.ops.aten
 # leave the remaining pointwise_ops list here for convenience,
@@ -473,7 +473,12 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = 
         out_placements: List[Placement] = []
 
         for placement in spec_to_follow.placements:
-            if isinstance(placement, Shard):
+            if isinstance(placement, InterleavedShard):
+                shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
+                common_ndim = len(common_shape)
+                new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
+                out_placements.append(InterleavedShard(new_shard_dim, placement.interleaved_size))
+            elif isinstance(placement, Shard):
                 shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim

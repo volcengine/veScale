@@ -24,7 +24,7 @@ from .registry import REGISTRY
 from .utils import validate_single_input
 
 
-_IS_DEBUG = True
+_IS_DEBUG = False
 
 register = REGISTRY.provide_register_for_policy("MEGATRON")
 

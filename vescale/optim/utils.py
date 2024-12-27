@@ -59,5 +59,20 @@ def param_is_sharded_or_replicate_on_first_rank(param):
     return False
 
 
+def zero_grad_group_helper(group, set_to_none: bool = True):
+    """Zero out the gradient for a group of parameters.
+    Note: copied from torch.optim.optimizer."""
+    for param in group:
+        if param.grad is not None:
+            if set_to_none:
+                param.grad = None
+            else:
+                if param.grad.grad_fn is not None:
+                    param.grad.detach_()
+                else:
+                    param.grad.requires_grad_(False)
+                param.grad.zero_()
+
+
 def param_is_shared(param):
     return getattr(param, "shared", False)
