@@ -49,7 +49,7 @@ def benchmark_tinyserve(tinyserve: TinyServe, prompts: List[str],
     Returns:
         Benchmark results
     """
-    print(f"\n🚀 Starting TinyServe benchmark with {len(prompts)} prompts...")
+        print(f"\n[BENCHMARK] Starting TinyServe benchmark with {len(prompts)} prompts...")
     
     results = {
         'total_requests': len(prompts),
@@ -60,7 +60,7 @@ def benchmark_tinyserve(tinyserve: TinyServe, prompts: List[str],
     }
     
     for i, prompt in enumerate(prompts):
-        print(f"\n📝 Processing prompt {i+1}/{len(prompts)}: {prompt[:50]}...")
+        print(f"\n[PROCESS] Processing prompt {i+1}/{len(prompts)}: {prompt[:50]}...")
         
         # Create request
         request = TinyServeRequest(
@@ -90,8 +90,8 @@ def benchmark_tinyserve(tinyserve: TinyServe, prompts: List[str],
             'kv_hit_rate': response.kv_cache_hit_rate
         })
         
-        print(f"   ✅ Generated {len(response.tokens)} tokens in {response.latency_ms:.2f}ms")
-        print(f"   💾 Memory: {response.memory_usage_gb:.3f}GB, KV Hit: {response.kv_cache_hit_rate:.1%}")
+        print(f"   [SUCCESS] Generated {len(response.tokens)} tokens in {response.latency_ms:.2f}ms")
+        print(f"   [MEMORY] Memory: {response.memory_usage_gb:.3f}GB, KV Hit: {response.kv_cache_hit_rate:.1%}")
     
     # Calculate averages
     results['avg_latency_ms'] = results['total_latency_ms'] / len(prompts)
@@ -105,10 +105,10 @@ def benchmark_tinyserve(tinyserve: TinyServe, prompts: List[str],
 def print_benchmark_results(results: Dict[str, Any]):
     """Print benchmark results in a formatted way."""
     print("\n" + "="*60)
-    print("📊 TINYSERVE BENCHMARK RESULTS")
+    print("[RESULTS] TINYSERVE BENCHMARK RESULTS")
     print("="*60)
     
-    print(f"📈 Performance Metrics:")
+    print(f"[METRICS] Performance Metrics:")
     print(f"   • Total Requests: {results['total_requests']}")
     print(f"   • Total Tokens Generated: {results['total_tokens']}")
     print(f"   • Average Latency: {results['avg_latency_ms']:.2f}ms")
@@ -116,7 +116,7 @@ def print_benchmark_results(results: Dict[str, Any]):
     print(f"   • Average Tokens per Request: {results['avg_tokens_per_request']:.1f}")
     print(f"   • Throughput: {results['throughput_tokens_per_sec']:.1f} tokens/sec")
     
-    print(f"\n🔍 Detailed Results:")
+    print(f"\n[DETAILS] Detailed Results:")
     for i, response in enumerate(results['responses']):
         print(f"   Request {i+1}:")
         print(f"     Prompt: {response['prompt'][:50]}...")
@@ -127,7 +127,7 @@ def print_benchmark_results(results: Dict[str, Any]):
 
 def demonstrate_plugin_system(tinyserve: TinyServe):
     """Demonstrate TinyServe's plugin system."""
-    print("\n🔌 Demonstrating Plugin System...")
+    print("\n[PLUGINS] Demonstrating Plugin System...")
     
     # Get plugin status
     plugin_status = tinyserve.plugin_manager.get_plugin_status()
@@ -141,7 +141,7 @@ def demonstrate_plugin_system(tinyserve: TinyServe):
     
     # Get system statistics
     stats = tinyserve.get_stats()
-    print(f"\n📊 System Statistics:")
+    print(f"\n[STATS] System Statistics:")
     print(f"   Total Requests: {stats['total_requests']}")
     print(f"   Total Tokens: {stats['total_tokens']}")
     print(f"   Average Latency: {stats['avg_latency_ms']:.2f}ms")
@@ -151,7 +151,7 @@ def demonstrate_plugin_system(tinyserve: TinyServe):
 
 def demonstrate_kv_optimization(tinyserve: TinyServe):
     """Demonstrate KV cache optimization features."""
-    print("\n💾 Demonstrating KV Cache Optimization...")
+    print("\n[KV_CACHE] Demonstrating KV Cache Optimization...")
     
     # Get page statistics
     page_stats = tinyserve.kv_retriever.get_page_statistics(tinyserve.page_metadata)
@@ -163,7 +163,7 @@ def demonstrate_kv_optimization(tinyserve: TinyServe):
     
     # Get attention statistics
     attention_stats = tinyserve.attention_executor.get_attention_stats()
-    print(f"\n   Attention Statistics:")
+    print(f"\n   [ATTENTION] Attention Statistics:")
     print(f"     Total Attention Calls: {attention_stats['total_attention_calls']}")
     print(f"     Average Attention Time: {attention_stats['avg_attention_time_ms']:.2f}ms")
     print(f"     Total Sparse Operations: {attention_stats['total_sparse_operations']}")
@@ -176,13 +176,13 @@ def main():
     
     # Check CUDA availability
     if torch.cuda.is_available():
-        print(f"✅ CUDA available: {torch.cuda.get_device_name(0)}")
+        print(f"[CUDA] CUDA available: {torch.cuda.get_device_name(0)}")
         print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
     else:
-        print("⚠️  CUDA not available, using CPU (performance may be limited)")
+        print("[WARNING] CUDA not available, using CPU (performance may be limited)")
     
     # Create optimized configuration for TinyLLaMA
-    print("\n⚙️  Creating optimized configuration for TinyLLaMA...")
+    print("\n[CONFIG] Creating optimized configuration for TinyLLaMA...")
     config = create_optimized_config_for_model(
         model_name="tinylama",
         target_latency_ms=50.0,
@@ -195,17 +195,17 @@ def main():
     print(f"   Target Memory: {config.target_memory_gb}GB")
     
     # Initialize TinyServe
-    print("\n🚀 Initializing TinyServe...")
+    print("\n[INIT] Initializing TinyServe...")
     tinyserve = TinyServe(config)
     
     # Load model (this would require actual model files)
-    print("\n📥 Loading model (simulated)...")
+    print("\n[MODEL] Loading model (simulated)...")
     try:
         # In a real scenario, you would load an actual model
         # tinyserve.load_model("microsoft/DialoGPT-small", "gpt2")
-        print("   ✅ Model loaded successfully (simulated)")
+        print("   [SUCCESS] Model loaded successfully (simulated)")
     except Exception as e:
-        print(f"   ⚠️  Model loading failed: {e}")
+        print(f"   [WARNING] Model loading failed: {e}")
         print("   Continuing with demonstration...")
     
     # Create sample prompts
@@ -224,7 +224,7 @@ def main():
     demonstrate_kv_optimization(tinyserve)
     
     # Show configuration optimization
-    print("\n🔧 Demonstrating Configuration Optimization...")
+    print("\n[OPTIMIZATION] Demonstrating Configuration Optimization...")
     current_performance = {
         'latency_ms': results['avg_latency_ms'],
         'memory_gb': results['avg_memory_gb']
@@ -237,11 +237,11 @@ def main():
     print(f"   Optimized Selection Ratio: {optimized_config.selection_ratio}")
     
     # Cleanup
-    print("\n🧹 Cleaning up...")
+    print("\n[CLEANUP] Cleaning up...")
     tinyserve.clear_cache()
     
-    print("\n✅ TinyServe demonstration completed!")
-    print("\n📚 Key Features Demonstrated:")
+    print("\n[SUCCESS] TinyServe demonstration completed!")
+    print("\n[FEATURES] Key Features Demonstrated:")
     print("   • Query-aware KV page selection")
     print("   • Structured sparsity with bounding-box metadata")
     print("   • Plugin-based optimization system")

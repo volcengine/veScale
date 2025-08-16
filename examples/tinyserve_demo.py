@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
     from vescale.tinyserve import TinyServeConfig, create_optimized_config_for_model
-    print("✅ Successfully imported TinyServe components")
+    print("[SUCCESS] Successfully imported TinyServe components")
 except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print(f"[ERROR] Import error: {e}")
     print("This demo requires TinyServe to be properly installed.")
     sys.exit(1)
 
@@ -122,7 +122,7 @@ def demonstrate_plugin_configuration():
 
 def demonstrate_validation():
     """Demonstrate configuration validation."""
-    print("\n✅ Configuration Validation Demonstration")
+    print("\n[VALIDATION] Configuration Validation Demonstration")
     print("=" * 50)
     
     print("Testing invalid configurations...")
@@ -130,30 +130,30 @@ def demonstrate_validation():
     # Test invalid page size
     try:
         invalid_config = TinyServeConfig(page_size=0)
-        print("   ❌ Should have failed for page_size=0")
+        print("   [ERROR] Should have failed for page_size=0")
     except ValueError as e:
-        print(f"   ✅ Correctly caught error: {e}")
+        print(f"   [SUCCESS] Correctly caught error: {e}")
     
     # Test invalid selection ratio
     try:
         invalid_config = TinyServeConfig(selection_ratio=1.5)
-        print("   ❌ Should have failed for selection_ratio=1.5")
+        print("   [ERROR] Should have failed for selection_ratio=1.5")
     except ValueError as e:
-        print(f"   ✅ Correctly caught error: {e}")
+        print(f"   [SUCCESS] Correctly caught error: {e}")
     
     # Test invalid entropy threshold
     try:
         invalid_config = TinyServeConfig(entropy_threshold=-0.1)
-        print("   ❌ Should have failed for entropy_threshold=-0.1")
+        print("   [ERROR] Should have failed for entropy_threshold=-0.1")
     except ValueError as e:
-        print(f"   ✅ Correctly caught error: {e}")
+        print(f"   [SUCCESS] Correctly caught error: {e}")
     
-    print("\nAll validation tests passed! ✅")
+    print("\nAll validation tests passed! [SUCCESS]")
 
 
 def main():
     """Main demonstration function."""
-    print("🎯 TinyServe: Query-Aware Cache Selection for Efficient LLM Serving")
+    print("[TINYSERVE] TinyServe: Query-Aware Cache Selection for Efficient LLM Serving")
     print("=" * 70)
     print("This demo showcases TinyServe's configuration and optimization capabilities.")
     print("Note: This is a demonstration of the configuration system only.")
@@ -173,20 +173,20 @@ def main():
         demonstrate_validation()
         
         print("\n" + "=" * 70)
-        print("🎉 TinyServe demonstration completed successfully!")
-        print("\n📚 Key Features Demonstrated:")
+        print("[SUCCESS] TinyServe demonstration completed successfully!")
+        print("\n[FEATURES] Key Features Demonstrated:")
         print("   • Flexible configuration system")
         print("   • Model-specific optimization")
         print("   • Dynamic configuration adaptation")
         print("   • Comprehensive plugin support")
         print("   • Robust validation system")
-        print("\n🚀 Next Steps:")
+        print("\n[NEXT] Next Steps:")
         print("   • Install required dependencies (PyTorch, Transformers)")
         print("   • Download a small language model (e.g., TinyLLaMA)")
         print("   • Run the full example: python examples/tinyserve_example.py")
         
     except Exception as e:
-        print(f"\n❌ Demonstration failed: {e}")
+        print(f"\n[ERROR] Demonstration failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -2,7 +2,7 @@
 
 TinyServe is a lightweight and extensible runtime system for deploying tiny language models (e.g., TinyLLaMA, GPT2-345M) with support for structured KV sparsity, plugin-based token selection, and hardware-efficient attention kernels.
 
-## 🎯 Overview
+## Overview
 
 Based on the research paper "TinyServe: Query-Aware Cache Selection for Efficient LLM Serving" (Liu & Yu, 2025), TinyServe enables efficient inference serving at small scale while maintaining the interpretability and control needed for systems research.
 
@@ -15,7 +15,7 @@ Based on the research paper "TinyServe: Query-Aware Cache Selection for Efficien
 - **Multi-GPU Support**: Scalable deployment across multiple GPUs
 - **Performance Monitoring**: Comprehensive metrics and optimization suggestions
 
-## 🏗️ Architecture
+## Architecture
 
 TinyServe is organized around three core components:
 
@@ -34,7 +34,7 @@ TinyServe is organized around three core components:
 - Fused CUDA kernels for page scoring, sparse memory access, and masked attention
 - Support for FP16/INT8 KV formats
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -104,7 +104,7 @@ config = TinyServeConfig(
 )
 ```
 
-## 🔌 Plugin System
+## Plugin System
 
 TinyServe includes several built-in plugins:
 
@@ -139,7 +139,7 @@ def custom_optimization_plugin(context):
 tinyserve.plugin_manager.register_plugin('custom_opt', custom_optimization_plugin)
 ```
 
-## 📊 Performance Monitoring
+## Performance Monitoring
 
 TinyServe provides comprehensive performance metrics:
 
@@ -159,7 +159,7 @@ plugin_stats = tinyserve.plugin_manager.get_plugin_stats()
 print(f"Early exits: {plugin_stats['early_exit_count']}")
 ```
 
-## 🔧 Advanced Features
+## Advanced Features
 
 ### Multi-GPU Deployment
 
@@ -191,7 +191,7 @@ for session_id in sessions:
     print(f"Session {session_id}: {info['request_count']} requests")
 ```
 
-## 📈 Benchmarking
+## Benchmarking
 
 TinyServe includes built-in benchmarking capabilities:
 
@@ -205,7 +205,7 @@ benchmark_results = tinyserve.attention_executor.benchmark_attention(
 print(f"Throughput: {benchmark_results['throughput_tokens_per_ms']:.1f} tokens/ms")
 ```
 
-## 🧪 Research Applications
+## Research Applications
 
 TinyServe is designed for LLM inference research:
 
@@ -214,7 +214,7 @@ TinyServe is designed for LLM inference research:
 - **Attention Optimization**: Experiment with attention approximation methods
 - **System Design**: Test new serving architectures without full-scale deployment
 
-## 📚 Paper Reference
+## Paper Reference
 
 This implementation is based on:
 
