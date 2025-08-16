@@ -61,6 +61,9 @@ _**veScale**_ is still in its early phase. We are refactoring our internal LLM t
 **Plan**
   * [Auto TP & SP Plan](./vescale/dmp/README.md)
 
+**Inference Serving**
+  * [TinyServe](./vescale/tinyserve/README.md) - Query-Aware Cache Selection for Efficient LLM Serving
+
 **[Checkpoint](./vescale/checkpoint/README.md)**
 
 ## [We Are Hiring!](https://volcengine.github.io/veScaleWeb/misc/join-us.html) ##
