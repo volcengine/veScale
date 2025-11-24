@@ -1,0 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+--pre
+expecttest
+hypothesis
+pytest<8.0.0
+tqdm
+optree
+accelerate
+transformers==4.40.2
+flash_attn
+matplotlib
+mmh3
