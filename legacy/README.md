@@ -25,11 +25,11 @@ _**An Industrial-Level Framework for Easy-of-Use**_
 
 ## Latest News
 
-- [2024-7-25] veScale's [pipeline parallelism](https://github.com/volcengine/veScale/blob/main/vescale/pipe/README.md) open sourced with API, graph parser, stage abstraction, schedules and execution runtime along with [nD distributed timeline](https://github.com/volcengine/veScale/blob/main/vescale/ndtimeline/README.md).
+- [2024-7-25] veScale's [pipeline parallelism](https://github.com/volcengine/veScale/blob/main/legacy/vescale/pipe/README.md) open sourced with API, graph parser, stage abstraction, schedules and execution runtime along with [nD distributed timeline](https://github.com/volcengine/veScale/blob/main/legacy/vescale/ndtimeline/README.md).
 
-- [2024-5-31] veScale's [fast checkpointing system](https://github.com/volcengine/veScale/blob/main/vescale/checkpoint/README.md) open sourced with automatic checkpoint resharding, caching, load-balancing, fast copying, deduplicating, and asynchronous io.
+- [2024-5-31] veScale's [fast checkpointing system](https://github.com/volcengine/veScale/blob/main/legacy/vescale/checkpoint/README.md) open sourced with automatic checkpoint resharding, caching, load-balancing, fast copying, deduplicating, and asynchronous io.
 
-- [2024-5-21] veScale's examples ([Mixtral](https://github.com/volcengine/veScale/tree/main/examples/mixtral_4D_training), [LLama2](https://github.com/volcengine/veScale/tree/main/examples/llama2_4D_finetune), and [nanoGPT](https://github.com/volcengine/veScale/tree/main/examples/nanogpt_4D_finetune)) open sourced with bit-wise correctness of training loss curves.
+- [2024-5-21] veScale's examples ([Mixtral](https://github.com/volcengine/veScale/tree/main/legacy/examples/mixtral_4D_training), [LLama2](https://github.com/volcengine/veScale/tree/main/legacy/examples/llama2_4D_finetune), and [nanoGPT](https://github.com/volcengine/veScale/tree/main/legacy/examples/nanogpt_4D_finetune)) open sourced with bit-wise correctness of training loss curves.
 
 - [2024-5-13] The debut of veScale in MLSys 2024 as a [poster](https://volcengine.github.io/veScaleWeb/blog/mlsys2024.html).
 

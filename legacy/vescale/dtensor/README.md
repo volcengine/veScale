@@ -130,9 +130,9 @@
     assert torch.equal(dt4.to_local(), t3) 
     ```
 
-- APIs can be found under `<repo>/vescale/dtensor/api.py`
+- APIs can be found under `<repo>/legacy/vescale/dtensor/api.py`
 
-- More examples can be found under `<repo>/test/dtensor/*/*.py`
+- More examples can be found under `<repo>/legacy/test/dtensor/*/*.py`
 
 - Original examples can be found in PyTorch [DTensor](https://github.com/pytorch/pytorch/tree/main/torch/distributed/_tensor).
 

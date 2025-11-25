@@ -120,6 +120,6 @@ Spinning up a `PP` job typically requires three steps: i) trace and parse model 
 
 - Example of using `MANUAL_EAGER` mode: Coming Soon.
 
-- APIs can be found in `<repo>/vescale/pipe/pipe_stage.py` and `<repo>/vescale/pipe/pipe.py`
+- APIs can be found in `<repo>/legacy/vescale/pipe/pipe_stage.py` and `<repo>/vescale/pipe/pipe.py`
 
-- More examples can be found in `<repo>/test/parallel/pipeline/api/test_simple_api.py`
+- More examples can be found in `<repo>/legacy/test/parallel/pipeline/api/test_simple_api.py`
