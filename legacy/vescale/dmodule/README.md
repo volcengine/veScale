@@ -89,6 +89,6 @@
 
     ```
 
-- APIs can be found in `<repo>/vescale/dmodule/api.py`
+- APIs can be found in `<repo>/legacy/vescale/dmodule/api.py`
 
-- More examples can be found under `<repo>/test/dmodule/*.py`
+- More examples can be found under `<repo>/legacy/test/dmodule/*.py`

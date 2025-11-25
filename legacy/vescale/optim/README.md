@@ -94,9 +94,9 @@ doptim.zero_grad()
 
 ```
 
-APIs can found in: `<repo>/vescale/optim/distributed_optimizer.py`.
+APIs can found in: `<repo>/legacy/vescale/optim/distributed_optimizer.py`.
 
-More examples can found in: `<repo>/test/parallel/ddp_optim/test_doptimizer.py`.
+More examples can found in: `<repo>/legacy/test/parallel/ddp_optim/test_doptimizer.py`.
 
 ### veScale `BasicOptimizer`
 
@@ -111,9 +111,9 @@ More examples can found in: `<repo>/test/parallel/ddp_optim/test_doptimizer.py`.
 - trigger gradient synchronization of `DModule` (e.g., for Sequence Parallel) 
 
 
-APIs can be found in: `<repo>/vescale/optim/base_optimizer.py`.
+APIs can be found in: `<repo>/legacy/vescale/optim/base_optimizer.py`.
 
-Examples can be found in `<repo>/test/parallel/ddp_optim/test_ddp.py`. 
+Examples can be found in `<repo>/legacy/test/parallel/ddp_optim/test_ddp.py`. 
 
 
 ## How are these optimizers related with `DDP`?

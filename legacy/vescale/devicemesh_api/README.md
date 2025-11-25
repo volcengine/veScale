@@ -65,6 +65,6 @@ for X, Y in data_set:
     optimizer.step()
 ```
 
-- APIs can be found in `<repo>/vescale/devicemesh_api/api.py`
+- APIs can be found in `<repo>/legacy/vescale/devicemesh_api/api.py`
 
-- More examples can be found under `<repo>/test/parallel/devicemesh_api/*.py`
+- More examples can be found under `<repo>/legacy/test/parallel/devicemesh_api/*.py`

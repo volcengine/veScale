@@ -1,76 +1,24 @@
-# Breaking Changes Coming Soon ...
-
-
-# New Publication: https://arxiv.org/abs/2509.07003
+# Old veScale Has been Moved to `legacy/`; New veScale is Coming ...
 
 <div align="center">
     <img src="./docs/pictures/icon.png" width="150"/>
 </div>
 
-# A PyTorch Native LLM Training Framework
+# veScale
 
-_**An Industrial-Level Framework for Easy-of-Use**_
+veScale is an internal PyTorch Distributed library, enabling hyperscale distributed training of LLMs and RLs. This repo open-sources a small piece of veScale for a better community.
 
-- 🔥 **PyTorch Native**: veScale is rooted in PyTorch-native data structures, operators, and APIs, enjoying the ecosystem of PyTorch that dominates the ML world.
+## Content
 
-- 🛡 **Zero Model Code Change**: veScale decouples distributed system design from model architecture, requiring near-zero or zero modification on the model code of users.
+- **[Quick Start](./docs/texts/quick-start.md)**
 
-- 🚀 **Single Device Abstraction**:  veScale provides single-device semantics to users, automatically distributing and orchestrating model execution in a cluster of devices. 
+- **[RaggedShard DTensor](./vescale/dtensor/README.md)**
 
-- 🎯 **Automatic Parallelism Planning**:  veScale parallelizes model execution with a synergy of strategies (tensor, sequence, data, ZeRO, pipeline parallelism) under semi- or full-automation [coming soon].
+## Publication
 
-- ⚡ **Eager & Compile Mode**: veScale supports not only Eager-mode automation for parallel training and inference but also Compile-mode for ultimate performance [coming soon].
+- **veScale 2025-2026**: Coming Soon
 
-- 📀 **Automatic Checkpoint Resharding**: veScale manages distributed checkpoints automatically with online resharding across different cluster sizes and different parallelism strategies. 
-
-## Latest News
-
-- [2024-7-25] veScale's [pipeline parallelism](https://github.com/volcengine/veScale/blob/main/vescale/pipe/README.md) open sourced with API, graph parser, stage abstraction, schedules and execution runtime along with [nD distributed timeline](https://github.com/volcengine/veScale/blob/main/vescale/ndtimeline/README.md).
-
-- [2024-5-31] veScale's [fast checkpointing system](https://github.com/volcengine/veScale/blob/main/vescale/checkpoint/README.md) open sourced with automatic checkpoint resharding, caching, load-balancing, fast copying, deduplicating, and asynchronous io.
-
-- [2024-5-21] veScale's examples ([Mixtral](https://github.com/volcengine/veScale/tree/main/examples/mixtral_4D_training), [LLama2](https://github.com/volcengine/veScale/tree/main/examples/llama2_4D_finetune), and [nanoGPT](https://github.com/volcengine/veScale/tree/main/examples/nanogpt_4D_finetune)) open sourced with bit-wise correctness of training loss curves.
-
-- [2024-5-13] The debut of veScale in MLSys 2024 as a [poster](https://volcengine.github.io/veScaleWeb/blog/mlsys2024.html).
-
-- [2024-4-16] Our [internal LLM training system](https://volcengine.github.io/veScaleWeb/blog/megascale.html) presented in NSDI 2024.
-
-## Coming Soon
-
-_**veScale**_ is still in its early phase. We are refactoring our internal LLM training system components to meet open source standard. The tentative timeline is as follows:
-
-- High-level [nD parallel api](https://github.com/volcengine/veScale/issues/39) for extreme ease of use
-
-- Power-user plan api for easy customization of nD parallel training
-
-- End-to-end vescale/examples with 5D parallel training (TP, SP, DP, ZeRO, PP)
-
-## Table of Content ([web view](https://volcengine.github.io/veScaleWeb/))
-
-**[Introduction](./docs/texts/introduction.md)**
-
-**[Quick Start](./docs/texts/quick-start.md)**
-
-**[DTensor](./vescale/dtensor/README.md)**
-
-**Parallel**
-  * [Overview](./docs/texts/parallel_overview.md)
-  * [Tensor Parallel & Sequence Parallel](./vescale/dmodule/README.md)
-  * [Data Parallel](./vescale/ddp/README.md)
-  * [Optimizer Parallel](./vescale/optim/README.md)
-  * [Pipeline Parallel](./vescale/pipe/README.md)
-  * [nD Device Mesh](./vescale/devicemesh_api/README.md)
-
-**Plan**
-  * [Auto TP & SP Plan](./vescale/dmp/README.md)
-
-**[Checkpoint](./vescale/checkpoint/README.md)**
-
-## [We Are Hiring!](https://volcengine.github.io/veScaleWeb/misc/join-us.html) ##
-
-## [License](./LICENSE)
-
-The veScale Project is under the Apache License v2.0.
+- **veScale 2023-2025**: https://arxiv.org/abs/2509.07003
 
 ## Citation
 
@@ -85,3 +33,7 @@ The veScale Project is under the Apache License v2.0.
       url={https://arxiv.org/abs/2509.07003}, 
 }
 ```
+
+## [License](./LICENSE)
+
+The veScale Project is under the Apache License v2.0.

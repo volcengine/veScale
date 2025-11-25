@@ -70,10 +70,10 @@ enabling users to load and save distributed model (e.g., `DModule`) and optimize
     vescale.checkpoint.load("/user/vescale/gpt/", checkpoint_state)
     ```
 
-- APIs can be found in: `<repo>/vescale/checkpoint/__init__.py`
+- APIs can be found in: `<repo>/legacy/vescale/checkpoint/__init__.py`
 
-- End-to-end example can be found in: `<repo>/examples/nanogpt_4D_finetune/finetune_4D.py`
+- End-to-end example can be found in: `<repo>/legacy/examples/nanogpt_4D_finetune/finetune_4D.py`
 
-- More examples can be found under `<repo>/test/checkpoint/*.py` and `<repo>/examples/`
+- More examples can be found under `<repo>/legacy/test/checkpoint/*.py` and `<repo>/examples/`
 
 - Original examples can be found in PyTorch [Distributed Checkpoint](https://github.com/pytorch/pytorch/tree/main/torch/distributed/checkpoint)

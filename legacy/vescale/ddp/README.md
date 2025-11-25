@@ -67,7 +67,7 @@ dp_tp_mlp(torch.rand(...)).sum().bakward()
 dp_tp_mlp.finish_grad_sync()
 ```
 
-- APIs can be found in `<repo>/vescale/ddp/distributed_data_parallel.py`
+- APIs can be found in `<repo>/legacy/vescale/ddp/distributed_data_parallel.py`
 
-- More examples can be found in `<repo>/test/parallel/ddp_optim/test_ddp.py`
+- More examples can be found in `<repo>/legacy/test/parallel/ddp_optim/test_ddp.py`
 
