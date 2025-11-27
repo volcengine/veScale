@@ -12,7 +12,7 @@ veScale is an internal PyTorch Distributed library, enabling hyperscale distribu
 
 - **[Quick Start](./docs/texts/quick-start.md)**
 
-- **[RaggedShard DTensor](./vescale/dtensor/README.md)**
+- **[RaggedShard DTensor](./docs/texts/raggedshard.md)**
 
 ## Publication
 
