@@ -16,13 +16,23 @@ veScale is an internal PyTorch Distributed library, enabling hyperscale distribu
 
 ## Publication
 
-- **veScale 2025-2026**: Coming Soon
+- **veScale 2025-2026**: https://arxiv.org/abs/2602.22437
 
 - **veScale 2023-2025**: https://arxiv.org/abs/2509.07003
 
 ## Citation
 
 ```bibtex
+@misc{wang2026vescalefsdpflexiblehighperformancefsdp,
+      title={veScale-FSDP: Flexible and High-Performance FSDP at Scale}, 
+      author={Zezhou Wang and Youjie Li and Zhiqi Lin and Jiacheng Yang and Cong Xie and Guanyu Feng and Zheng Zhong and Ziyue Huang and Hongyu Zhu and Zhi Zhang and Yanghua Peng and Xin Liu},
+      year={2026},
+      eprint={2602.22437},
+      archivePrefix={arXiv},
+      primaryClass={cs.DC},
+      url={https://arxiv.org/abs/2602.22437}, 
+}
+
 @misc{li2025vescale,
       title={veScale: Consistent and Efficient Tensor Programming with Eager-Mode SPMD}, 
       author={Youjie Li and Cheng Wan and Zhiqi Lin and Hongyu Zhu and Jiacheng Yang and Ziang Song and Xinyi Di and Jiawei Wu and Huiyao Shu and Wenlei Bao and Yanghua Peng and Haibin Lin and Li-Wen Chang},
