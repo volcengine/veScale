@@ -20,7 +20,7 @@ from typing import Any
 
 def patch_method(target: Any, method_name: str, raise_error=False):
     def helper(func):
-        fn = getattr(target, "method_name", None)
+        fn = getattr(target, method_name, None)
 
         if fn is None:
             setattr(target, method_name, func)
